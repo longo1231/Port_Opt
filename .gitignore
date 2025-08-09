@@ -55,6 +55,10 @@ Thumbs.db
 simple_test.py
 launch_app.py
 
+# Debug and test archives (temporary files from development)
+debug_archive/
+tests_archive/
+
 # Data files (optional - uncomment if you don't want to track data files)
 # *.csv
 # *.xlsx

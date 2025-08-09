@@ -22,7 +22,7 @@ from data.loader import DataLoader
 from features.estimators import estimate_all_parameters
 from opt.optimizer import PortfolioOptimizer, compute_portfolio_attribution
 from config import (
-    ASSETS, DEFAULT_LOOKBACK_DAYS, DEFAULT_MU_SIGMA_HALFLIFE,
+    ASSETS, DEFAULT_LOOKBACK_DAYS, DEFAULT_MU_HALFLIFE, DEFAULT_SIGMA_HALFLIFE,
     DEFAULT_CORR_HALFLIFE, DEFAULT_SHRINKAGE, DEFAULT_TRANSACTION_COST_BPS,
     DEFAULT_TURNOVER_PENALTY, DEFAULT_OPTIMIZER_METHOD, TRADING_DAYS_PER_YEAR
 )
@@ -69,8 +69,8 @@ class BacktestEngine:
             'mu_window': DEFAULT_LOOKBACK_DAYS,
             'vol_window': DEFAULT_LOOKBACK_DAYS,
             'corr_window': DEFAULT_LOOKBACK_DAYS,
-            'mu_halflife': DEFAULT_MU_SIGMA_HALFLIFE,
-            'vol_halflife': DEFAULT_MU_SIGMA_HALFLIFE,
+            'mu_halflife': DEFAULT_MU_HALFLIFE,
+            'vol_halflife': DEFAULT_SIGMA_HALFLIFE,
             'corr_halflife': DEFAULT_CORR_HALFLIFE,
             'shrinkage': DEFAULT_SHRINKAGE
         }
@@ -142,7 +142,7 @@ class BacktestEngine:
             if should_rebalance and len(hist_data) >= self.min_history_days:
                 # Estimate parameters
                 try:
-                    mu, cov_matrix, volatilities = estimate_all_parameters(
+                    mu, cov_matrix, volatilities, _ = estimate_all_parameters(
                         hist_data, **self.estimation_params
                     )
                     

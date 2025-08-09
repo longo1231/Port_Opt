@@ -19,7 +19,8 @@ import warnings
 
 from config import (
     N_ASSETS, DEFAULT_MC_SIMULATIONS, DEFAULT_TRANSACTION_COST_BPS,
-    DEFAULT_TURNOVER_PENALTY, MIN_WEIGHT
+    DEFAULT_TURNOVER_PENALTY, DEFAULT_KELLY_FRACTION, DEFAULT_LEVERAGE_CAP,
+    MIN_WEIGHT, ASSETS, DEFAULT_MAX_WEIGHT, DEFAULT_MIN_WEIGHT
 )
 
 
@@ -35,6 +36,10 @@ class PortfolioOptimizer:
         self,
         transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
         turnover_penalty: float = DEFAULT_TURNOVER_PENALTY,
+        kelly_fraction: float = DEFAULT_KELLY_FRACTION,
+        leverage_cap: float = DEFAULT_LEVERAGE_CAP,
+        max_weight: float = DEFAULT_MAX_WEIGHT,
+        min_weight: float = DEFAULT_MIN_WEIGHT,
         random_seed: Optional[int] = 42
     ):
         """
@@ -46,15 +51,76 @@ class PortfolioOptimizer:
             Transaction cost in basis points per side
         turnover_penalty : float, default from config
             L1 penalty coefficient for turnover regularization
+        kelly_fraction : float, default from config
+            Partial Kelly fraction (0-1) to scale risk exposure
+        leverage_cap : float, default from config
+            Maximum leverage allowed (1.0 = no leverage)
         random_seed : int, optional
             Random seed for Monte Carlo simulations
         """
         self.transaction_cost_bps = transaction_cost_bps
         self.turnover_penalty = turnover_penalty
+        self.kelly_fraction = np.clip(kelly_fraction, 0.0, 1.0)
+        self.leverage_cap = max(leverage_cap, 0.0)
+        self.max_weight = np.clip(max_weight, 0.0, 1.0)
+        self.min_weight = np.clip(min_weight, 0.0, max_weight)
         self.random_seed = random_seed
         
         if random_seed is not None:
             np.random.seed(random_seed)
+    
+    def _apply_kelly_fraction_and_leverage(self, kelly_weights: np.ndarray) -> np.ndarray:
+        """
+        Apply partial Kelly fraction and leverage constraints to optimal Kelly weights.
+        
+        Parameters
+        ----------
+        kelly_weights : np.ndarray
+            Optimal Kelly weights (may be leveraged)
+            
+        Returns
+        -------
+        np.ndarray
+            Final portfolio weights with Kelly fraction and leverage applied
+        """
+        # Apply partial Kelly: scale risky positions, allocate remainder to cash
+        if 'Cash' in ASSETS:
+            cash_idx = ASSETS.index('Cash')
+            risky_weights = kelly_weights.copy()
+            risky_weights[cash_idx] = 0  # Separate out cash
+            
+            # Scale risky weights by Kelly fraction
+            scaled_risky = risky_weights * self.kelly_fraction
+            
+            # Allocate remainder to cash
+            final_weights = scaled_risky
+            final_weights[cash_idx] = 1 - scaled_risky.sum()
+            
+            # Ensure cash weight is non-negative
+            if final_weights[cash_idx] < 0:
+                # If we need to borrow cash, scale down risky positions
+                scale_factor = 1.0 / scaled_risky.sum()
+                final_weights = scaled_risky * scale_factor
+                final_weights[cash_idx] = 0
+        else:
+            # No cash asset, just scale all weights
+            final_weights = kelly_weights * self.kelly_fraction
+            final_weights = final_weights / final_weights.sum()
+        
+        # Apply leverage constraint (sum of absolute weights)
+        total_leverage = np.sum(np.abs(final_weights))
+        if total_leverage > self.leverage_cap:
+            final_weights = final_weights * (self.leverage_cap / total_leverage)
+        
+        # Ensure weights are normalized and non-negative for long-only
+        final_weights = np.maximum(final_weights, 0)
+        if final_weights.sum() > 0:
+            final_weights = final_weights / final_weights.sum()
+        else:
+            # Fallback to equal weights
+            final_weights = np.ones(len(kelly_weights)) / len(kelly_weights)
+            
+        return final_weights
     
     def optimize_quadratic(
         self,
@@ -134,16 +200,20 @@ class PortfolioOptimizer:
             raise RuntimeError("CVXPY returned None for optimal weights")
         
         # Clean up tiny weights
-        optimal_weights = np.maximum(optimal_weights, 0)
-        optimal_weights = optimal_weights / optimal_weights.sum()
+        kelly_weights = np.maximum(optimal_weights, 0)
+        kelly_weights = kelly_weights / kelly_weights.sum()
         
-        # Calculate final objective value
-        obj_value = (optimal_weights @ expected_returns - 
-                    0.5 * optimal_weights @ covariance_matrix @ optimal_weights -
-                    self.turnover_penalty * np.sum(np.abs(optimal_weights - current_weights)))
+        # Apply partial Kelly fraction and leverage constraints
+        final_weights = self._apply_kelly_fraction_and_leverage(kelly_weights)
+        
+        # Calculate final objective value (based on Kelly weights, not final weights)
+        obj_value = (kelly_weights @ expected_returns - 
+                    0.5 * kelly_weights @ covariance_matrix @ kelly_weights -
+                    self.turnover_penalty * np.sum(np.abs(kelly_weights - current_weights)))
         
         return {
-            'weights': optimal_weights,
+            'weights': final_weights,
+            'kelly_weights': kelly_weights,  # Store original Kelly weights
             'objective_value': float(obj_value),
             'success': True,
             'method': 'cvxpy',
@@ -175,10 +245,12 @@ class PortfolioOptimizer:
         constraints = [
             {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}  # Budget constraint
         ]
-        bounds = Bounds(lb=0, ub=1)  # Long-only constraint
+        bounds = Bounds(lb=self.min_weight, ub=self.max_weight)  # Position size constraints
         
-        # Initial guess
+        # Initial guess - respect weight constraints
         x0 = np.ones(n_assets) / n_assets
+        x0 = np.clip(x0, self.min_weight, self.max_weight)
+        x0 = x0 / x0.sum()  # Renormalize
         
         # Optimize
         result = minimize(
@@ -194,11 +266,15 @@ class PortfolioOptimizer:
         if not result.success:
             warnings.warn(f"SciPy optimization failed: {result.message}")
         
-        optimal_weights = np.maximum(result.x, 0)
-        optimal_weights = optimal_weights / optimal_weights.sum()
+        kelly_weights = np.maximum(result.x, 0)
+        kelly_weights = kelly_weights / kelly_weights.sum()
+        
+        # Apply partial Kelly fraction and leverage constraints
+        final_weights = self._apply_kelly_fraction_and_leverage(kelly_weights)
         
         return {
-            'weights': optimal_weights,
+            'weights': final_weights,
+            'kelly_weights': kelly_weights,  # Store original Kelly weights
             'objective_value': float(-result.fun),
             'success': result.success,
             'method': 'scipy_slsqp',
@@ -279,10 +355,12 @@ class PortfolioOptimizer:
         constraints = [
             {'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}
         ]
-        bounds = Bounds(lb=0, ub=1)
+        bounds = Bounds(lb=self.min_weight, ub=self.max_weight)
         
-        # Initial guess
+        # Initial guess - respect weight constraints
         x0 = np.ones(n_assets) / n_assets
+        x0 = np.clip(x0, self.min_weight, self.max_weight)
+        x0 = x0 / x0.sum()  # Renormalize
         
         # Optimize
         result = minimize(
@@ -298,17 +376,21 @@ class PortfolioOptimizer:
         if not result.success:
             warnings.warn(f"Monte Carlo optimization failed: {result.message}")
         
-        optimal_weights = np.maximum(result.x, 0)
-        optimal_weights = optimal_weights / optimal_weights.sum()
+        kelly_weights = np.maximum(result.x, 0)
+        kelly_weights = kelly_weights / kelly_weights.sum()
         
-        # Calculate final objective (annualized expected log return)
-        portfolio_returns = samples @ optimal_weights
+        # Apply partial Kelly fraction and leverage constraints
+        final_weights = self._apply_kelly_fraction_and_leverage(kelly_weights)
+        
+        # Calculate final objective (annualized expected log return, using Kelly weights)
+        portfolio_returns = samples @ kelly_weights
         portfolio_returns = np.maximum(portfolio_returns, -0.99)
         expected_log_return = np.mean(np.log(1 + portfolio_returns)) * 252
-        turnover_cost = self.turnover_penalty * np.sum(np.abs(optimal_weights - current_weights))
+        turnover_cost = self.turnover_penalty * np.sum(np.abs(kelly_weights - current_weights))
         
         return {
-            'weights': optimal_weights,
+            'weights': final_weights,
+            'kelly_weights': kelly_weights,  # Store original Kelly weights
             'objective_value': float(expected_log_return - turnover_cost),
             'success': result.success,
             'method': 'monte_carlo',

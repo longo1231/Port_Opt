@@ -33,6 +33,7 @@ from opt.optimizer import PortfolioOptimizer, compute_portfolio_attribution
 from backtest.engine import BacktestEngine, analyze_backtest_performance
 from utils.metrics import calculate_returns_metrics, calculate_drawdown_metrics
 from config import *
+from config import DEFAULT_MU_HALFLIFE, DEFAULT_SIGMA_HALFLIFE, DEFAULT_KELLY_FRACTION, DEFAULT_LEVERAGE_CAP
 
 
 # Page configuration
@@ -123,29 +124,74 @@ def create_sidebar():
     ) 
     
     st.sidebar.divider()
-    st.sidebar.subheader("🧮 Estimation Parameters")
     
-    # Estimation method
-    estimation_method = st.sidebar.selectbox(
-        "Estimation Method",
-        ["EWMA", "Rolling Window"],
-        help="EWMA adapts faster to regime changes"
+    # Expected return method (SPEC-COMPLIANT: adaptive μ estimation)
+    st.sidebar.subheader("📈 Expected Returns (μ)")
+    mu_method = st.sidebar.selectbox(
+        "μ Estimation Method",
+        ["EWMA (Slow)", "Rolling Window (Slow)"],
+        help="Slow adaptation to minimize noise in return forecasts"
     )
     
-    if estimation_method == "EWMA":
-        mu_halflife = st.sidebar.slider("μ/σ Half-life (days)", 10, 100, DEFAULT_MU_SIGMA_HALFLIFE)
-        corr_halflife = st.sidebar.slider("ρ Half-life (days)", 5, 50, DEFAULT_CORR_HALFLIFE)
-        mu_window = vol_window = corr_window = DEFAULT_LOOKBACK_DAYS
+    if mu_method == "EWMA (Slow)":
+        mu_halflife = st.sidebar.slider("μ Half-life (days)", 30, 252, DEFAULT_MU_HALFLIFE)
+        mu_window = DEFAULT_LOOKBACK_DAYS
     else:
-        mu_window = st.sidebar.slider("μ/σ Window (days)", 50, 500, DEFAULT_LOOKBACK_DAYS)
+        mu_window = st.sidebar.slider("μ Window (days)", 100, 500, DEFAULT_LOOKBACK_DAYS)
+        mu_halflife = DEFAULT_MU_HALFLIFE
+    
+    st.sidebar.divider()
+    
+    # Risk estimation parameters (σ and ρ)
+    st.sidebar.subheader("⚡ Risk Estimation (σ, ρ)") 
+    risk_estimation_method = st.sidebar.selectbox(
+        "Risk Method",
+        ["EWMA", "Rolling Window"],
+        help="Risk parameters adapt to market changes: σ medium speed, ρ fast speed"
+    )
+    
+    if risk_estimation_method == "EWMA":
+        vol_halflife = st.sidebar.slider("σ Half-life (days)", 10, 100, DEFAULT_SIGMA_HALFLIFE)
+        corr_halflife = st.sidebar.slider("ρ Half-life (days)", 5, 50, DEFAULT_CORR_HALFLIFE)
+        vol_window = corr_window = DEFAULT_LOOKBACK_DAYS
+    else:
+        vol_window = st.sidebar.slider("σ Window (days)", 50, 500, DEFAULT_LOOKBACK_DAYS)
         corr_window = st.sidebar.slider("ρ Window (days)", 20, 200, 60)
-        mu_halflife = vol_halflife = corr_halflife = None
-        vol_window = mu_window
+        vol_halflife = corr_halflife = None
     
     # Shrinkage
     shrinkage = st.sidebar.slider(
         "Covariance Shrinkage", 0.0, 1.0, DEFAULT_SHRINKAGE, 0.05,
         help="Regularization towards diagonal matrix"
+    )
+    
+    st.sidebar.divider()
+    st.sidebar.subheader("🎯 Kelly Criterion Controls")
+    
+    # Partial Kelly fraction
+    kelly_fraction = st.sidebar.slider(
+        "Kelly Fraction", 0.0, 1.0, DEFAULT_KELLY_FRACTION, 0.05,
+        help="Partial Kelly to handle μ uncertainty (0.5 = half Kelly for safety)"
+    )
+    
+    # Leverage cap
+    leverage_cap = st.sidebar.slider(
+        "Leverage Cap", 0.0, 3.0, DEFAULT_LEVERAGE_CAP, 0.1,
+        help="Maximum total exposure (1.0 = no leverage, >1.0 = leveraged)"
+    )
+    
+    # Weight constraints  
+    st.sidebar.write("**Position Size Limits**")
+    max_weight = st.sidebar.slider(
+        "Max Weight per Asset", 0.25, 1.0, DEFAULT_MAX_WEIGHT, 0.05,
+        format="%.0f%%",
+        help="Maximum allocation per asset (prevents concentration)"
+    )
+    
+    min_weight = st.sidebar.slider(
+        "Min Weight per Asset", 0.0, 0.20, DEFAULT_MIN_WEIGHT, 0.01,
+        format="%.1f%%", 
+        help="Minimum allocation per asset (forces diversification)"
     )
     
     st.sidebar.divider()
@@ -181,18 +227,27 @@ def create_sidebar():
         ["Daily", "Weekly", "Monthly"]
     )
     
-    # Package parameters
+    # Package parameters (SPEC-COMPLIANT)
     params = {
         'data_phase': data_phase,
         'risk_free_rate': risk_free_rate,
-        'estimation_method': estimation_method.lower().replace(' ', '_'),
+        # μ estimation parameters (slow adaptation)
+        'mu_method': mu_method.lower().split('(')[0].strip().replace(' ', '_'),
         'mu_window': mu_window,
+        'mu_halflife': mu_halflife,
+        # Risk estimation parameters (σ medium, ρ fast)
+        'risk_estimation_method': risk_estimation_method.lower().replace(' ', '_'),
         'vol_window': vol_window, 
         'corr_window': corr_window,
-        'mu_halflife': mu_halflife,
-        'vol_halflife': mu_halflife,  # Same as mu
+        'vol_halflife': vol_halflife,
         'corr_halflife': corr_halflife,
         'shrinkage': shrinkage,
+        # Kelly and leverage controls
+        'kelly_fraction': kelly_fraction,
+        'leverage_cap': leverage_cap,
+        'max_weight': max_weight,
+        'min_weight': min_weight,
+        # Optimization settings
         'opt_method': opt_method.lower().replace(' ', '_'),
         'mc_sims': mc_sims,
         'transaction_cost': transaction_cost,
@@ -241,19 +296,20 @@ def load_data(params):
 def optimize_portfolio(data, params):
     """Optimize portfolio with current parameters."""
     try:
-        # Estimate parameters
+        # Estimate parameters using SPEC-COMPLIANT approach
         method_map = {
             'ewma': 'ewma',
             'rolling_window': 'rolling'
         }
         
-        est_method = method_map[params['estimation_method']]
+        mu_method = method_map[params['mu_method']]
+        risk_method = method_map[params['risk_estimation_method']]
         
-        mu, cov_matrix, volatilities = estimate_all_parameters(
+        mu, cov_matrix, volatilities, corr_status = estimate_all_parameters(
             data,
-            mu_method=est_method,
-            vol_method=est_method,
-            corr_method=est_method,
+            mu_method=mu_method,
+            vol_method=risk_method,
+            corr_method=risk_method,
             mu_window=params['mu_window'],
             vol_window=params['vol_window'],
             corr_window=params['corr_window'],
@@ -263,10 +319,14 @@ def optimize_portfolio(data, params):
             shrinkage=params['shrinkage']
         )
         
-        # Create optimizer
+        # Create optimizer with Kelly fraction and leverage controls
         optimizer = PortfolioOptimizer(
             transaction_cost_bps=params['transaction_cost'],
-            turnover_penalty=params['turnover_penalty']
+            turnover_penalty=params['turnover_penalty'],
+            kelly_fraction=params['kelly_fraction'],
+            leverage_cap=params['leverage_cap'],
+            max_weight=params['max_weight'],
+            min_weight=params['min_weight']
         )
         
         # Optimize
@@ -305,7 +365,8 @@ def optimize_portfolio(data, params):
                 'cov_matrix': cov_matrix,
                 'volatilities': volatilities,
                 'portfolio_stats': portfolio_stats,
-                'attribution': attribution
+                'attribution': attribution,
+                'correlation_status': corr_status
             }
         else:
             return {'success': False, 'error': 'Optimization failed'}
@@ -337,14 +398,17 @@ def create_correlation_heatmap(cov_matrix, volatilities):
     # Extract correlation matrix from covariance
     corr_matrix = cov_matrix / np.outer(volatilities, volatilities)
     
+    # Ensure proper formatting - pre-format the text array
+    text_array = [[f"{val:.3f}" for val in row] for row in corr_matrix]
+    
     fig = go.Figure(data=go.Heatmap(
         z=corr_matrix,
         x=ASSETS,
         y=ASSETS,
         colorscale='RdBu_r',
         zmid=0,
-        text=np.round(corr_matrix, 3),
-        texttemplate="%{text}",
+        text=text_array,  # Pre-formatted text
+        texttemplate="%{text}",  # Use pre-formatted text directly
         textfont={"size": 12},
         colorbar=dict(title="Correlation")
     ))
@@ -399,11 +463,19 @@ def create_risk_return_chart(mu, volatilities, weights):
 def run_backtest(data, params):
     """Run portfolio backtest."""
     try:
-        # Setup estimation parameters
+        # Setup estimation parameters using new parameter structure
+        method_map = {
+            'ewma': 'ewma',
+            'rolling_window': 'rolling'
+        }
+        
+        mu_method = method_map[params['mu_method']]
+        risk_method = method_map[params['risk_estimation_method']]
+        
         est_params = {
-            'mu_method': 'ewma' if params['estimation_method'] == 'ewma' else 'rolling',
-            'vol_method': 'ewma' if params['estimation_method'] == 'ewma' else 'rolling', 
-            'corr_method': 'ewma' if params['estimation_method'] == 'ewma' else 'rolling',
+            'mu_method': mu_method,
+            'vol_method': risk_method,
+            'corr_method': risk_method,
             'mu_window': params['mu_window'],
             'vol_window': params['vol_window'],
             'corr_window': params['corr_window'],
@@ -413,10 +485,14 @@ def run_backtest(data, params):
             'shrinkage': params['shrinkage']
         }
         
-        # Create optimizer and engine
+        # Create optimizer and engine with Kelly parameters
         optimizer = PortfolioOptimizer(
             transaction_cost_bps=params['transaction_cost'],
-            turnover_penalty=params['turnover_penalty']
+            turnover_penalty=params['turnover_penalty'],
+            kelly_fraction=params['kelly_fraction'],
+            leverage_cap=params['leverage_cap'],
+            max_weight=params['max_weight'],
+            min_weight=params['min_weight']
         )
         
         engine = BacktestEngine(
@@ -514,8 +590,8 @@ def main():
     # Sidebar controls
     params = create_sidebar()
     
-    # Main content area
-    col1, col2 = st.columns([2, 1])
+    # Main content area - more balanced columns
+    col1, col2 = st.columns([3, 2])
     
     with col2:
         # Load data button
@@ -533,7 +609,23 @@ def main():
     if st.session_state.current_data is not None:
         data = st.session_state.current_data
         
+        # Data summary - always displayed cleanly and wide
+        st.subheader("📋 Data Summary")
+        
+        # Basic info in one horizontal line
+        start_date = data.index[0].date()
+        end_date = data.index[-1].date()
+        n_obs = len(data)
+        st.write(f"**📅 {start_date} to {end_date}** • **📊 {n_obs:,} observations** • **💼 {len(ASSETS)} assets**")
+        
+        # Recent performance - all in one horizontal row
+        st.write("**Recent Performance (5 days, annualized):**")
+        recent_returns = data.tail(5).mean() * 252
+        perf_text = " • ".join([f"**{asset}:** {recent_returns[asset]:.1%}" for asset in ASSETS])
+        st.write(perf_text)
+        
         # Optimization section
+        st.divider()
         st.header("🎯 Portfolio Optimization")
         
         col1, col2 = st.columns([1, 1])
@@ -577,26 +669,51 @@ def main():
                             use_container_width=True
                         )
                         
-                        # Risk-return and correlation charts
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.plotly_chart(
-                                create_risk_return_chart(
-                                    opt_result['mu'], 
-                                    opt_result['volatilities'],
-                                    opt_result['weights']
-                                ),
-                                use_container_width=True
-                            )
+                        # Risk-return and correlation charts (full-width for better visibility)
+                        st.plotly_chart(
+                            create_risk_return_chart(
+                                opt_result['mu'], 
+                                opt_result['volatilities'],
+                                opt_result['weights']
+                            ),
+                            use_container_width=True
+                        )
                         
-                        with col2:
-                            st.plotly_chart(
-                                create_correlation_heatmap(
-                                    opt_result['cov_matrix'],
-                                    opt_result['volatilities']
-                                ),
-                                use_container_width=True
-                            )
+                        st.plotly_chart(
+                            create_correlation_heatmap(
+                                opt_result['cov_matrix'],
+                                opt_result['volatilities']
+                            ),
+                            use_container_width=True
+                        )
+                        
+                        # Correlation estimation status
+                        if 'correlation_status' in opt_result:
+                            corr_status = opt_result['correlation_status']
+                            
+                            # Create status summary
+                            status_text = f"**Correlation Estimation:** {corr_status.get('estimation_method', 'unknown')}"
+                            if corr_status.get('data_dropped', 0) > 0:
+                                status_text += f" | Dropped {corr_status['data_dropped']} rows with missing data"
+                            status_text += f" | {corr_status.get('clean_observations', 0)} observations used"
+                            
+                            # Show any warnings or fallback methods
+                            if corr_status.get('warnings') or corr_status.get('fallback_used'):
+                                if corr_status.get('fallback_used'):
+                                    st.warning(f"⚠️ {status_text}")
+                                    for warning in corr_status.get('warnings', []):
+                                        st.caption(f"• {warning}")
+                                else:
+                                    st.info(f"ℹ️ {status_text}")
+                                    
+                                # Show positive definite issues if any
+                                pd_issues = corr_status.get('positive_definite_issues', [])
+                                if pd_issues:
+                                    st.caption("**Numerical adjustments:**")
+                                    for issue in pd_issues:
+                                        st.caption(f"• {issue}")
+                            else:
+                                st.success(f"✅ {status_text}")
                         
                         # Attribution analysis
                         st.subheader("Performance Attribution")
@@ -617,17 +734,7 @@ def main():
                         st.error(f"Optimization failed: {opt_result['error']}")
         
         with col2:
-            # Data summary
-            st.subheader("📋 Data Summary")
-            st.write(f"**Date Range:** {data.index[0].date()} to {data.index[-1].date()}")
-            st.write(f"**Observations:** {len(data)}")
-            st.write(f"**Assets:** {', '.join(ASSETS)}")
-            
-            # Recent returns
-            st.write("**Recent Performance (5 days)**")
-            recent_returns = data.tail(5).mean()
-            for asset in ASSETS:
-                st.write(f"{asset}: {recent_returns[asset]*252:.1%}")
+            pass  # This column is now available for other content if needed
         
         # Backtesting section
         st.divider()

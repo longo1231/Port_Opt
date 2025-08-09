@@ -148,18 +148,18 @@ class DataLoader:
         Returns
         -------
         pd.DataFrame
-            DataFrame with columns [SPX, TLT, GLD, Cash] containing daily log returns
+            DataFrame with columns [SPY, TLT, GLD, Cash] containing daily log returns
             
         Raises
         ------
         Exception
             If data fetching fails or insufficient data is available
         """
-        # Ticker mapping
+        # Ticker mapping (now using SPY directly per spec)
         ticker_map = {
-            'SPX': 'SPY',  # Use SPY as proxy for SPX
-            'TLT': 'TLT',
-            'GLD': 'GLD'
+            'SPY': 'SPY',  # SPY ETF per spec
+            'TLT': 'TLT',  # 20+ year Treasury ETF
+            'GLD': 'GLD'   # Gold ETF
         }
         
         try:
@@ -218,15 +218,15 @@ class DataLoader:
             if len(prices) < 2:
                 raise ValueError("Insufficient data points after cleaning")
             
-            # Calculate log returns
-            log_returns = np.log(prices / prices.shift(1)).dropna()
+            # Calculate simple returns: r_t = P_t / P_{t-1} - 1
+            simple_returns = prices.pct_change().dropna()
             
             # Add cash returns (constant daily risk-free rate)
             daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
-            log_returns['Cash'] = daily_rf
+            simple_returns['Cash'] = daily_rf
             
             # Ensure column order matches ASSETS
-            return log_returns[ASSETS]
+            return simple_returns[ASSETS]
             
         except Exception as e:
             raise Exception(f"Failed to fetch market data: {str(e)}")
