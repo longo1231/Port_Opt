@@ -707,6 +707,67 @@ def main():
                         "Outperformance" if outperformance >= 0 else "Underperformance"
                     )
                 
+                # SPY Benchmark Comparison
+                if 'SPY' in data.columns:
+                    # Calculate SPY individual metrics
+                    spy_returns = data['SPY']
+                    spy_total_return = performance_data['individual_cumulative']['SPY'].iloc[-1] - 1
+                    spy_vol = spy_returns.std() * np.sqrt(252)
+                    spy_sharpe = (spy_returns.mean() * 252) / spy_vol if spy_vol > 0 else 0
+                    
+                    # Calculate SPY max drawdown
+                    spy_cumulative = performance_data['individual_cumulative']['SPY']
+                    spy_peak = spy_cumulative.cummax()
+                    spy_drawdown = (spy_cumulative - spy_peak) / spy_peak
+                    spy_max_drawdown = spy_drawdown.min()
+                    
+                    # Portfolio vs SPY comparison (SPY - Portfolio to show SPY's difference from Portfolio)
+                    return_diff = spy_total_return - performance_data['portfolio_total_return']
+                    vol_diff = spy_vol - performance_data['portfolio_vol']
+                    sharpe_diff = spy_sharpe - performance_data['portfolio_sharpe']
+                    dd_diff = spy_max_drawdown - performance_data['max_drawdown']
+                    
+                    st.markdown("---")
+                    
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    
+                    with col1:
+                        st.metric(
+                            "SPY Total Return",
+                            f"{spy_total_return:.1%}",
+                            f"{return_diff:+.1%} vs Portfolio"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "SPY Volatility",
+                            f"{spy_vol:.1%}",
+                            f"{vol_diff:+.1%} vs Portfolio"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "SPY Sharpe Ratio",
+                            f"{spy_sharpe:.2f}",
+                            f"{sharpe_diff:+.2f} vs Portfolio"
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            "SPY Max Drawdown",
+                            f"{spy_max_drawdown:.1%}",
+                            f"{dd_diff:+.1%} vs Portfolio"
+                        )
+                    
+                    with col5:
+                        # Diversification benefit summary
+                        vol_benefit = (spy_vol - performance_data['portfolio_vol']) / spy_vol
+                        st.metric(
+                            "Diversification Benefit",
+                            f"{vol_benefit:.1%}",
+                            "Volatility reduction"
+                        )
+                
                 # Advanced metrics charts (Phase 3)
                 if len(data) > 252:  # Only show if we have enough data for rolling metrics
                     col_left, col_right = st.columns(2)
