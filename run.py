@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Portfolio Optimizer - Breaking the Market Approach
+Minimum Variance Portfolio Optimizer
 
-Run the Streamlit application for Kelly criterion portfolio optimization.
+Run the Streamlit application for minimum variance portfolio optimization.
 """
 
 import subprocess
@@ -12,8 +12,8 @@ import os
 
 def main():
     """Launch the Portfolio Optimizer Streamlit app."""
-    print("🚀 Starting Portfolio Optimizer...")
-    print("   Breaking the Market methodology with Kelly criterion")
+    print("🚀 Starting Minimum Variance Portfolio Optimizer...")
+    print("   Pure risk reduction through diversification")
     print("   Access the app at: http://localhost:8503")
     print()
     
@@ -21,7 +21,7 @@ def main():
         # Run the Streamlit app
         subprocess.run([
             sys.executable, "-m", "streamlit", "run", 
-            "app_simple.py", 
+            "app.py", 
             "--server.port", "8503",
             "--server.headless", "true",
             "--browser.gatherUsageStats", "false"

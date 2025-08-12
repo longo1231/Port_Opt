@@ -1,172 +1,162 @@
 # Changelog
 
-All notable changes to the Kelly Criterion Portfolio Optimizer will be documented in this file.
+All notable changes to the Minimum Variance Portfolio Optimizer will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2025-01-08
+## [2.0.0] - 2025-01-12
 
-### 🎉 Initial Release
+### 🎉 Major Architecture Shift - Minimum Variance Approach
 
-**Phase 1 - Simulated Data Foundation**
-- ✅ Complete portfolio optimization framework
-- ✅ Kelly Criterion implementation (quadratic + Monte Carlo)
-- ✅ Flexible parameter estimation (EWMA + Rolling)
-- ✅ Comprehensive backtesting engine
-- ✅ Interactive Streamlit dashboard
-- ✅ Transaction costs and turnover penalties
-- ✅ Performance attribution analysis
-- ✅ Full test suite validation
+**Fundamental Change**: Eliminated Kelly Criterion and expected returns optimization in favor of minimum variance approach for stable, diversified portfolios.
 
-**Phase 2 - Live Market Data Integration**  
-- ✅ Yahoo Finance data integration
-- ✅ SPY/TLT/GLD price fetching
-- ✅ Robust error handling for API changes
-- ✅ Real-time market data processing
-- ✅ Date range selection and validation
+#### Why the Change?
+- **Kelly Criterion Issues**: Expected returns (μ) are extremely noisy and unstable
+- **Corner Solutions**: Optimizers heavily favored single assets (100% allocations)
+- **Volatility**: Small changes in μ caused massive portfolio shifts
+- **Solution**: Minimum variance focuses purely on risk reduction through diversification
+
+### Changed
+
+#### Core Optimization
+- **Old**: Kelly Criterion `max E[log(1 + r)]` with expected returns
+- **New**: Minimum Variance `min w'Σw` eliminating expected returns entirely
+- **Benefit**: Naturally diversified portfolios, no corner solutions
+- **Stability**: Covariance matrices much more stable than expected returns
+
+#### Parameter Estimation  
+- **Retained**: Breaking the Market windows (σ=60d medium, ρ=30d fast)
+- **Eliminated**: Expected returns estimation (no longer needed)
+- **Enhanced**: Robust covariance matrix estimation with fallbacks
+- **Added**: Treasury bill integration (BIL ETF) for realistic cash returns
+
+#### User Interface
+- **Enhanced**: Clear minimum variance methodology explanation
+- **Added**: Risk contribution analysis (optimized vs equal weight)
+- **Added**: Historical performance analysis with quick date buttons
+- **Added**: Comprehensive volatility analysis (period vs window)
+- **Fixed**: Dynamic chart labeling based on actual slider values
+
+### Fixed
+
+#### Critical Bug Fixes
+1. **Yahoo Finance Ticker Mapping** (Major)
+   - **Problem**: Column order mismatch caused wrong data assignment
+   - **Impact**: SPY data assigned to GLD, completely wrong calculations
+   - **Solution**: Proper ticker-to-column mapping in `data/loader.py:219-231`
+   - **Detection**: User noticed impossible YTD returns (SPY 25%, GLD 2%)
+
+2. **Simple vs Log Returns**
+   - **Problem**: Mixed return types caused optimization inconsistencies  
+   - **Solution**: Standardized on simple returns (`pct_change()`) throughout
+   - **Impact**: Proper risk calculations and portfolio weights
+
+3. **Cash Domination**
+   - **Problem**: Optimizer chose 100% Cash (zero volatility optimal)
+   - **Solution**: Exclude cash from optimization, focus on risky asset diversification
+   - **Config**: `EXCLUDE_CASH_FROM_OPTIMIZATION = True`
+
+#### UI/UX Improvements
+- **Volatility Display**: Separated period vs window volatility appropriately
+- **Date Selection**: Quick buttons (1Y, 2Y, 3Y, 5Y, 10Y, YTD) for easy analysis
+- **Returns Table**: Show actual period volatility, not window volatility
+- **Chart Labels**: Dynamic labeling based on actual slider values
 
 ### Added
 
-#### Core Features
-- **Portfolio Optimization**
-  - Kelly Criterion maximization with long-only constraints
-  - Quadratic approximation for fast optimization
-  - Monte Carlo simulation for exact expected log utility
-  - CVXPY and SciPy solver integration with fallbacks
+#### New Features
+- **Treasury Integration**: Real Treasury bill returns via BIL ETF
+- **Historical Analysis**: Comprehensive backtest showing how current portfolio would have performed
+- **Risk Analysis**: Side-by-side comparison of optimized vs equal weight risk contributions
+- **Advanced Metrics**: Rolling Sharpe ratio and drawdown analysis
+- **Period Selection**: Quick date range buttons with custom option
 
-- **Parameter Estimation**
-  - EWMA and rolling window methods
-  - Separate half-lives for μ/σ vs correlations
-  - Covariance shrinkage regularization
-  - Positive definite matrix enforcement
-
-- **Risk Management**
-  - Transaction costs (basis points per side)
-  - Turnover penalties (L1 regularization)
-  - Daily/weekly/monthly rebalancing frequencies
-  - Comprehensive risk metrics
-
-- **User Interface**
-  - Interactive Streamlit dashboard
-  - Real-time parameter controls
-  - Portfolio weights visualization
-  - Risk-return scatter plots
-  - Correlation heatmaps
-  - Backtesting results display
-
-#### Data Sources
-- **Simulated Data**: Multivariate normal returns with configurable parameters
-- **Market Data**: Yahoo Finance integration for SPY, TLT, GLD
-- **Cash Asset**: Constant risk-free rate modeling
-
-#### Performance Analytics
-- **Return Metrics**: Total return, Sharpe ratio, Sortino ratio, hit rate
-- **Risk Metrics**: Volatility, max drawdown, VaR, Calmar ratio
-- **Cost Analysis**: Transaction costs, turnover tracking, cost drag
-- **Attribution**: Return/risk/cost component decomposition
-
-#### Testing & Validation
-- **Phase 1 Tests**: Complete simulated data validation
-- **Phase 2 Tests**: Market data integration verification
-- **Unit Tests**: Parameter estimation and optimization validation
-- **Integration Tests**: End-to-end backtesting validation
+#### Enhanced Visualizations
+- **Risk Contributions**: Shows why minimum variance works (equal marginal risk)
+- **Volatility Comparison**: Individual vs portfolio volatility with diversification benefits
+- **Performance Charts**: Historical performance with proper benchmarking
+- **Dynamic Labels**: Charts update based on actual parameter settings
 
 ### Technical Implementation
 
-#### Architecture
+#### Current Architecture
 ```
-Modular design with clear separation of concerns:
-- data/: Data loading and validation
-- features/: Statistical parameter estimation  
-- opt/: Portfolio optimization algorithms
-- backtest/: Trading simulation engine
-- ui/: Streamlit dashboard interface
-- utils/: Performance metrics and utilities
+Port_Optimizer/
+├── app.py                  # Streamlit dashboard (minimum variance focused)
+├── optimizer.py            # Minimum variance optimization  
+├── estimators.py           # Covariance estimation (no μ needed)
+├── config.py               # Configuration parameters
+├── data/loader.py          # Yahoo Finance + Treasury integration
+├── run.py                  # Application launcher
+└── CLAUDE.md               # Development documentation
 ```
 
-#### Dependencies
-- **Core**: NumPy, Pandas, SciPy
-- **Optimization**: CVXPY, scikit-learn
-- **Data**: yfinance, requests
-- **UI**: Streamlit, Plotly, Seaborn
-- **Testing**: Built-in validation framework
-
-#### Configuration
-- **Defaults**: Production-ready parameter defaults
-- **Customization**: Full UI and programmatic control
-- **Validation**: Input validation and error handling
+#### Key Dependencies
+- **Core**: NumPy, Pandas, SciPy (for optimization)
+- **Data**: yfinance (market data), BIL ETF (Treasury bills)
+- **UI**: Streamlit, Plotly (interactive charts)
+- **Optimization**: scipy.optimize.minimize (SLSQP method)
 
 ### Performance & Reliability
 
-#### Optimization
-- **Speed**: Quadratic method ~10ms, Monte Carlo ~100ms
-- **Memory**: Efficient pandas operations, minimal memory footprint
-- **Scalability**: Handles multi-year backtests with daily rebalancing
+#### Optimization Results
+- **Typical Allocation**: SPY ~18%, TLT ~55%, GLD ~27% (varies with conditions)
+- **Diversification Ratio**: ~1.4 (40% volatility reduction from correlation benefits)
+- **Effective Assets**: ~2.8 (well-diversified, not concentrated)
+- **Stability**: Portfolio weights change gradually with market conditions
 
 #### Error Handling
-- **Data Failures**: Graceful fallbacks for missing/corrupted data
-- **API Issues**: Yahoo Finance error recovery and retry logic
-- **Numerical Stability**: Positive definite matrix enforcement
-- **Solver Failures**: Automatic fallback between CVXPY and SciPy
+- **Data Quality**: Robust Yahoo Finance parsing with fallbacks
+- **Treasury Integration**: Graceful fallback to constant rate if BIL unavailable
+- **Correlation Issues**: Fallback correlation matrices for sparse data
+- **Numerical Stability**: Positive definite enforcement
 
-#### Validation
-- **Data Quality**: NaN detection, outlier handling, range validation
-- **Mathematical**: Constraint satisfaction, objective monotonicity
-- **Financial Logic**: Sensible portfolio weights, cost attribution
+### Success Metrics
+
+A properly functioning minimum variance portfolio shows:
+- **Multiple Assets**: Meaningful weights (>5%) across assets
+- **Diversification Ratio > 1.0**: Clear correlation benefits
+- **Effective Assets > 1.5**: Not concentrated in single position  
+- **No Domination**: No single asset >80% (except extreme market conditions)
 
 ### Known Limitations
 
-1. **Correlation Estimation**: EWMA can produce NaN values with insufficient data
-   - *Mitigation*: Fallback correlation matrices implemented
-
-2. **CVXPY Solver**: May not be available on all systems
-   - *Mitigation*: Automatic fallback to SciPy SLSQP
-
-3. **Yahoo Finance API**: Rate limiting and structure changes possible
-   - *Mitigation*: Robust parsing and error handling
-
-4. **Memory Usage**: Large backtests with daily rebalancing can be memory-intensive
-   - *Mitigation*: Use weekly/monthly rebalancing for long periods
-
-### Future Roadmap
-
-#### Planned Enhancements
-- **Additional Assets**: Crypto, commodities, international equities
-- **Advanced Models**: Black-Litterman, risk parity, factor models
-- **Performance**: Caching, parallel processing, optimized data structures
-- **Features**: Regime detection, stress testing, scenario analysis
-
-#### Technical Improvements
-- **Database**: Persistent storage for historical results
-- **API**: RESTful API for programmatic access
-- **Deployment**: Docker containerization, cloud deployment
-- **Monitoring**: Logging, alerting, performance tracking
+1. **Expected Returns**: Still calculated for display but NOT used in optimization
+2. **Cash Modeling**: Excluded from optimization to focus on risky asset diversification
+3. **Market Regimes**: Correlation-based optimization may not adapt to fundamental shifts
+4. **Optimization Method**: Uses SLSQP, may find local optima in complex cases
 
 ---
 
-## Development Notes
+## [1.0.0] - 2025-01-08 (DEPRECATED)
 
-### Testing Status
-- ✅ Phase 1: All simulated data tests passing
-- ✅ Phase 2: Market data integration working
-- ✅ Streamlit: Dashboard fully functional
-- ✅ Performance: All metrics calculating correctly
+### Initial Kelly Criterion Implementation (Superseded)
 
-### Code Quality
-- **Docstrings**: NumPy-style documentation throughout
-- **Type Hints**: Full type annotation coverage
-- **Error Handling**: Comprehensive exception management
-- **Logging**: Structured warning and error messages
+This version implemented Kelly Criterion optimization but was found to produce unstable, highly concentrated portfolios due to the noisy nature of expected returns estimation.
 
-### Deployment Ready
-The system is production-ready with:
-- Robust error handling and fallbacks
-- Comprehensive input validation
-- Performance monitoring and metrics
-- Clear documentation and examples
-- Extensive test coverage
+**Issues that led to v2.0.0:**
+- Frequent 100% single-asset allocations
+- Extreme sensitivity to expected returns estimates
+- Poor diversification despite sophisticated risk modeling
+- High portfolio turnover from parameter changes
 
 ---
 
-*For detailed technical documentation, see individual module docstrings and the README.md file.*
+## Future Roadmap
+
+### Potential Enhancements
+- **Black-Litterman**: Incorporate market views with uncertainty
+- **Risk Parity**: Alternative to minimum variance for different risk budgets  
+- **Factor Models**: Multi-factor risk decomposition
+- **Regime Detection**: Adapt correlation windows to market conditions
+
+### Technical Improvements
+- **Database**: Persistent storage for historical analysis
+- **Performance**: Caching for faster UI updates
+- **Testing**: Expanded test suite for edge cases
+- **Documentation**: Video tutorials and case studies
+
+---
+
+*The minimum variance approach has proven much more stable and practical than the original Kelly Criterion implementation, providing consistent diversification benefits without the instability of expected returns optimization.*

@@ -1,25 +1,23 @@
-# Portfolio Optimizer - Breaking the Market
+# Minimum Variance Portfolio Optimizer
 
-A clean Kelly criterion portfolio optimizer following the "Breaking the Market" methodology.
+A clean and stable minimum variance portfolio optimizer that achieves natural diversification by eliminating expected returns from the optimization.
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![Streamlit](https://img.shields.io/badge/Framework-Streamlit-red)
 
 ## 🎯 Overview
 
-This application implements pure Kelly criterion portfolio optimization for SPY, TLT, GLD, and Cash using the "Breaking the Market" approach:
+This application implements minimum variance portfolio optimization for SPY, TLT, GLD, and Cash. By eliminating expected returns from the objective function, it avoids corner solutions and naturally creates diversified portfolios.
 
-- **μ (returns)**: 252-day window (slow, uncertain)
-- **σ (volatility)**: 60-day window (medium adaptation)  
-- **ρ (correlations)**: 30-day window (fast regime changes)
+**Key Innovation**: Focuses purely on **risk reduction through diversification** rather than trying to predict which assets will perform best.
 
-### Key Features
+### Core Features
 
-- **Pure Kelly Optimization**: `max w^T μ - 0.5 w^T Σ w`
-- **Simple Returns**: Fixed log vs simple returns bug for proper Kelly calculation
-- **Real-time Data**: Yahoo Finance integration with proper error handling
-- **Interactive Dashboard**: Clean Streamlit interface with minimal controls
-- **Breaking the Market Philosophy**: Fast correlations, medium volatility, slow returns
+- **Minimum Variance Optimization**: `min w^T Σ w` (no expected returns needed)
+- **Natural Diversification**: Only way to reduce risk is through correlation benefits
+- **Stable Results**: Covariance matrices are more stable than expected returns
+- **Real-time Data**: Yahoo Finance integration with robust error handling
+- **Clean Interface**: Clear visualization of diversification benefits
 
 ## 🚀 Quick Start
 
@@ -30,96 +28,144 @@ This application implements pure Kelly criterion portfolio optimization for SPY,
 
 2. **Run the application**:
    ```bash
-   python run.py
+   streamlit run app.py
    ```
 
-3. **Open your browser** to http://localhost:8503
+3. **Open your browser** to http://localhost:8501
 
 ## 📁 Project Structure
 
 ```
 Port_Optimizer/
-├── run.py                  # Main launcher
-├── app_simple.py          # Streamlit dashboard  
-├── config_simple.py       # Configuration (windows, assets)
-├── estimators_simple.py   # Parameter estimation
-├── optimizer_simple.py    # Kelly optimization
+├── app.py                  # Streamlit dashboard
+├── optimizer.py            # Minimum variance optimization
+├── estimators.py           # Covariance matrix estimation
+├── config.py               # Configuration parameters
 ├── data/
-│   └── loader.py          # Yahoo Finance data loading
-├── legacy_system/         # Original complex system (archived)
-├── debug_archive/         # Debugging scripts (archived)
-├── tests_archive/         # Test scripts (archived)
-└── docs_archive/          # Documentation (archived)
+│   └── loader.py          # Yahoo Finance data (simple returns)
+├── test_phase1.py          # Core functionality tests
+├── test_streamlit.py       # Market data integration tests
+└── CLAUDE.md               # Development documentation
 ```
 
 ## 🔧 Configuration
 
-Edit `config_simple.py` to modify:
+Edit `config.py` to modify:
 
 - **Assets**: Currently SPY, TLT, GLD, Cash
-- **Estimation windows**: MU_WINDOW=252, SIGMA_WINDOW=60, RHO_WINDOW=30
+- **Estimation windows**: SIGMA_WINDOW=60, RHO_WINDOW=30 (Breaking the Market)
+- **Cash exclusion**: EXCLUDE_CASH_FROM_OPTIMIZATION=True
 - **Risk-free rate**: For cash returns
-- **Date ranges**: Default lookback period
 
 ## 🧮 Methodology
 
-### Breaking the Market Approach
+### Why Minimum Variance Works
 
-1. **Returns (μ)**: Use longer window (252 days) since returns are uncertain and noisy
-2. **Volatility (σ)**: Use medium window (60 days) for moderate adaptation to regime changes  
-3. **Correlations (ρ)**: Use short window (30 days) since correlations change quickly
+**The Problem with Expected Returns (μ):**
+- Expected returns are extremely noisy and unstable
+- Small changes in μ cause massive portfolio shifts  
+- Optimizers chase the highest historical performer → 100% allocations
 
-### Kelly Criterion
+**The Minimum Variance Solution:**
+- **Eliminates μ entirely** - only uses covariance matrix (Σ)
+- **Covariance is more stable** than expected returns over time
+- **Natural diversification** - only way to reduce risk is correlation benefits
+- **No corner solutions** - single assets can never be optimal
 
-Maximizes expected log growth: `E[log(1 + w^T R)]`
+### Parameter Estimation
 
-Quadratic approximation: `max w^T μ - 0.5 w^T Σ w`
-Subject to: `Σw = 1, w ≥ 0`
+Following "Breaking the Market" philosophy:
+- **σ (volatility)**: 60 days (medium adaptation)
+- **ρ (correlations)**: 30 days (fast regime changes)
+- **No μ needed** - eliminated from optimization
 
-### Data Processing
+### Mathematical Formulation
 
-- **Simple returns**: `r_t = P_t / P_{t-1} - 1` (not log returns)
-- **Proper annualization**: Both μ and Σ consistently annualized
-- **Covariance construction**: `Σ = D·ρ·D` where D = diag(σ)
+**Objective**: Minimize portfolio variance
+```
+min w^T Σ w
+```
+
+**Subject to**:
+- Budget constraint: Σw = 1
+- Long-only: w ≥ 0
+- Exclude Cash: Optimize only risky assets
 
 ## 📊 Dashboard Features
 
-- **Parameter Display**: Shows current μ, σ, Sharpe ratios
+### Key Visualizations
+- **Portfolio Weights**: Bar chart showing diversified allocation
 - **Correlation Matrix**: Real-time correlation heatmap
-- **Optimization Results**: Portfolio weights and statistics
-- **Time Period Selection**: Interactive date range picker
-- **Methodology Info**: Displays estimation windows used
+- **Risk Analysis**: Risk contributions vs portfolio weights
+- **Volatility Comparison**: Individual vs portfolio volatility
 
-## 🔍 Debugging
+### Diversification Metrics
+- **Diversification Ratio**: Weighted avg vol / portfolio vol (>1 = diversification benefit)
+- **Effective # Assets**: 1/Σ(w²) - concentration measure (4.0 = equal weights)
+- **Max Weight**: Largest position (shows concentration level)
+- **Risk Contributions**: How much each asset contributes to total risk
 
-Debug scripts are archived in `debug_archive/` including:
+## ✅ Success Criteria
 
-- **Analytical solutions**: Verify optimization math
-- **Correlation analysis**: Check correlation calculations
-- **Kelly formula tests**: Different Kelly formulations
-- **Data validation**: Yahoo Finance data quality checks
+A well-functioning minimum variance portfolio should show:
+- **Multiple assets** with meaningful weights (>5%)
+- **Diversification ratio > 1.0** (indicates correlation benefits)
+- **Effective assets > 1.5** (not concentrated in single position)
+- **No domination** (no single asset >80% except in extreme cases)
 
-## 📈 Recent Fixes
+## 🔧 Critical Bug Fixes
 
-- ✅ Fixed log vs simple returns bug (major impact)
-- ✅ Proper covariance matrix usage in optimization
-- ✅ Corrected μ estimation to use rolling windows
-- ✅ Fixed correlation calculation and display
-- ✅ Cleaned up UI and removed unnecessary complexity
+### 1. Log vs Simple Returns (SOLVED)
+- **Problem**: Log returns caused double-penalty on variance
+- **Solution**: Use simple returns (`pct_change()`) in data/loader.py:231
+- **Impact**: Eliminated bias toward low-volatility assets
 
-## 🚨 Important Notes
+### 2. Cash Domination (SOLVED)  
+- **Problem**: Optimizer chose 100% Cash (zero volatility)
+- **Solution**: `EXCLUDE_CASH_FROM_OPTIMIZATION = True`
+- **Impact**: Focuses on risky asset diversification
 
-**Mathematical Correctness**: The optimizer will sometimes show 100% allocation to a single asset. This is mathematically correct Kelly behavior when:
-- One asset has significantly higher risk-adjusted returns
-- Return differentials outweigh diversification benefits
-- The selected time period favors one asset strongly
+## 🧪 Testing
 
-**Diversification**: Diversification benefits appear when assets have similar risk-adjusted returns and low/negative correlations.
+Run tests to validate functionality:
+
+```bash
+python test_phase1.py      # Simulated data validation
+python test_streamlit.py   # Market data integration
+```
+
+**Test Focus**: Ensure diversified portfolios, no 100% single-asset allocations
+
+## 📈 Key Insights
+
+**Typical Results**: 
+- SPY: ~18%, TLT: ~55%, GLD: ~27% (varies with market conditions)
+- Diversification Ratio: ~1.4 (40% volatility reduction from diversification)
+- Effective Assets: ~2.8 (well-diversified across assets)
+
+**Why This Works**:
+- TLT-SPY negative correlation provides major diversification benefit
+- GLD adds further diversification and inflation protection
+- Portfolio volatility significantly lower than individual assets
+- Focus on "smoothest ride" rather than "highest returns"
+
+## 🚨 When to Be Concerned
+
+The optimizer should **NOT** show:
+- 100% allocation to any single asset (indicates correlation issues)
+- Diversification ratio close to 1.0 (no diversification benefit)
+- Effective assets close to 1.0 (concentrated portfolio)
+
+These indicate data or methodology issues that need investigation.
 
 ## 📄 License
 
 MIT License - see LICENSE file for details.
 
-## 🤝 Contributing
+## 🤝 Development
 
-This is a cleaned-up implementation following debugging and optimization work. The original complex system is preserved in `legacy_system/` for reference.
+See `CLAUDE.md` for detailed development instructions, including:
+- Adding new assets or metrics
+- Modifying risk models
+- Understanding the minimum variance approach
+- Testing and validation procedures

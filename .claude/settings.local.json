@@ -5,7 +5,9 @@
       "Bash(pip install:*)",
       "Bash(python:*)",
       "Bash(grep:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(rm:*)",
+      "Bash(streamlit run:*)"
     ],
     "deny": []
   }

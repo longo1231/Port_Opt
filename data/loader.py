@@ -17,9 +17,18 @@ from datetime import datetime, timedelta
 import warnings
 
 from config import (
-    ASSETS, DEFAULT_SIM_MU, DEFAULT_SIM_SIGMA, DEFAULT_SIM_CORR,
-    DEFAULT_RISK_FREE_RATE, TRADING_DAYS_PER_YEAR
+    ASSETS, RISK_FREE_RATE as DEFAULT_RISK_FREE_RATE, 
+    TRADING_DAYS_PER_YEAR
 )
+# Legacy simulation parameters (not used in simple version)
+DEFAULT_SIM_MU = np.array([0.08, 0.03, 0.05, 0.02])
+DEFAULT_SIM_SIGMA = np.array([0.16, 0.05, 0.20, 0.001]) 
+DEFAULT_SIM_CORR = np.array([
+    [1.00, -0.25, 0.30, 0.00],
+    [-0.25, 1.00, -0.10, 0.00], 
+    [0.30, -0.10, 1.00, 0.00],
+    [0.00, 0.00, 0.00, 1.00]
+])
 
 
 class DataLoader:
@@ -128,13 +137,14 @@ class DataLoader:
         self,
         start_date: str,
         end_date: str,
-        risk_free_rate: float = DEFAULT_RISK_FREE_RATE
+        risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
+        use_treasury_bills: bool = True
     ) -> pd.DataFrame:
         """
         Fetch real market data from Yahoo Finance.
         
         Downloads adjusted closing prices for SPY, TLT, GLD and computes
-        log returns. Adds constant risk-free rate for cash returns.
+        simple returns. Uses Treasury bill ETF (BIL) for cash returns if available.
         
         Parameters
         ----------
@@ -143,12 +153,14 @@ class DataLoader:
         end_date : str  
             End date in 'YYYY-MM-DD' format
         risk_free_rate : float, default from config
-            Annualized risk-free rate for cash
+            Annualized risk-free rate fallback for cash
+        use_treasury_bills : bool, default True
+            Whether to use Treasury bill ETF data for cash returns
             
         Returns
         -------
         pd.DataFrame
-            DataFrame with columns [SPY, TLT, GLD, Cash] containing daily log returns
+            DataFrame with columns [SPY, TLT, GLD, Cash] containing daily simple returns
             
         Raises
         ------
@@ -204,7 +216,19 @@ class DataLoader:
                     else:
                         prices = data[['Close']]
                     
-                    prices.columns = list(ticker_map.keys())
+                    # CRITICAL FIX: Map the actual Yahoo column order to our desired order
+                    # Yahoo may return columns in different order than we requested
+                    original_columns = list(prices.columns)
+                    
+                    # Create properly ordered DataFrame with our asset names
+                    ordered_prices = pd.DataFrame(index=prices.index)
+                    for our_name, yahoo_ticker in ticker_map.items():
+                        if yahoo_ticker in original_columns:
+                            ordered_prices[our_name] = prices[yahoo_ticker]
+                        else:
+                            print(f"Warning: {yahoo_ticker} not found in Yahoo data")
+                    
+                    prices = ordered_prices
             
             except Exception as col_error:
                 # If column handling fails, try a different approach
@@ -221,9 +245,51 @@ class DataLoader:
             # Calculate simple returns: r_t = P_t / P_{t-1} - 1
             simple_returns = prices.pct_change().dropna()
             
-            # Add cash returns (constant daily risk-free rate)
-            daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
-            simple_returns['Cash'] = daily_rf
+            # Add cash returns - try Treasury bills first, fallback to constant rate
+            if use_treasury_bills:
+                try:
+                    # Fetch Treasury bill ETF data (BIL = SPDR 1-3 Month Treasury ETF)
+                    treasury_data = yf.download(
+                        'BIL', 
+                        start=start_date, 
+                        end=end_date,
+                        progress=False
+                    )
+                    
+                    if not treasury_data.empty:
+                        # Handle multi-level columns from yfinance
+                        if hasattr(treasury_data.columns, 'levels'):
+                            treasury_prices = treasury_data['Close'].iloc[:, 0] if len(treasury_data['Close'].shape) > 1 else treasury_data['Close']
+                        else:
+                            treasury_prices = treasury_data['Close']
+                        
+                        # Calculate Treasury bill returns and align with main data
+                        treasury_returns = treasury_prices.pct_change().dropna()
+                        
+                        # Align dates with main returns data
+                        aligned_treasury = treasury_returns.reindex(simple_returns.index, method='ffill')
+                        
+                        # Use Treasury returns where available, fallback to constant rate
+                        cash_returns = aligned_treasury.fillna(risk_free_rate / TRADING_DAYS_PER_YEAR)
+                        simple_returns['Cash'] = cash_returns
+                        
+                        print(f"✅ Using Treasury bill returns (BIL ETF) for Cash - {len(treasury_returns)} days available")
+                    else:
+                        # Fallback to constant rate
+                        daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+                        simple_returns['Cash'] = daily_rf
+                        print(f"⚠️  Treasury data empty, using constant {risk_free_rate:.1%} rate")
+                        
+                except Exception as treasury_error:
+                    # Fallback to constant rate
+                    daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+                    simple_returns['Cash'] = daily_rf
+                    print(f"⚠️  Treasury fetch failed: {str(treasury_error)[:50]}... Using constant {risk_free_rate:.1%} rate")
+            else:
+                # Use constant risk-free rate
+                daily_rf = risk_free_rate / TRADING_DAYS_PER_YEAR
+                simple_returns['Cash'] = daily_rf
+                print(f"ℹ️  Using constant risk-free rate: {risk_free_rate:.1%}")
             
             # Ensure column order matches ASSETS
             return simple_returns[ASSETS]
