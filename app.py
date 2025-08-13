@@ -334,6 +334,97 @@ def create_backtest_performance_chart(backtest_results, original_data, static_we
     return fig
 
 
+def create_drawdown_chart(backtest_results, data, static_weights):
+    """Create comprehensive drawdown chart for all portfolios and individual assets."""
+    fig = go.Figure()
+    
+    # Get the backtest period data
+    start_date = backtest_results['backtest_start']
+    end_date = backtest_results['backtest_end']
+    period_data = data.loc[start_date:end_date]
+    
+    # Colors for different series
+    colors = {
+        'Dynamic Portfolio': '#2E86C1',  # Blue
+        'Static Portfolio': '#28B463',   # Green  
+        'SPY': '#E74C3C',                # Red
+        'TLT': '#F39C12',                # Orange
+        'GLD': '#8E44AD'                 # Purple
+    }
+    
+    # 1. Dynamic Portfolio Drawdown (from backtest results)
+    dynamic_returns = backtest_results['portfolio_returns']
+    if len(dynamic_returns) > 0:
+        dynamic_cumulative = (1 + dynamic_returns).cumprod()
+        dynamic_peak = dynamic_cumulative.cummax()
+        dynamic_drawdown = (dynamic_cumulative - dynamic_peak) / dynamic_peak
+        
+        fig.add_trace(go.Scatter(
+            x=dynamic_drawdown.index,
+            y=dynamic_drawdown * 100,
+            mode='lines',
+            name='Dynamic Portfolio',
+            line=dict(color=colors['Dynamic Portfolio'], width=2),
+            hovertemplate='<b>Dynamic Portfolio</b><br>Date: %{x}<br>Drawdown: %{y:.2f}%<extra></extra>'
+        ))
+    
+    # 2. Static Portfolio Drawdown
+    static_returns = (period_data * static_weights).sum(axis=1)
+    static_cumulative = (1 + static_returns).cumprod()
+    static_peak = static_cumulative.cummax()
+    static_drawdown = (static_cumulative - static_peak) / static_peak
+    
+    fig.add_trace(go.Scatter(
+        x=static_drawdown.index,
+        y=static_drawdown * 100,
+        mode='lines',
+        name='Static Portfolio',
+        line=dict(color=colors['Static Portfolio'], width=2),
+        hovertemplate='<b>Static Portfolio</b><br>Date: %{x}<br>Drawdown: %{y:.2f}%<extra></extra>'
+    ))
+    
+    # 3. Individual Assets Drawdowns
+    for asset in ['SPY', 'TLT', 'GLD']:
+        asset_returns = period_data[asset]
+        asset_cumulative = (1 + asset_returns).cumprod()
+        asset_peak = asset_cumulative.cummax()
+        asset_drawdown = (asset_cumulative - asset_peak) / asset_peak
+        
+        fig.add_trace(go.Scatter(
+            x=asset_drawdown.index,
+            y=asset_drawdown * 100,
+            mode='lines',
+            name=asset,
+            line=dict(color=colors[asset], width=1.5, dash='dot'),
+            hovertemplate=f'<b>{asset}</b><br>Date: %{{x}}<br>Drawdown: %{{y:.2f}}%<extra></extra>'
+        ))
+    
+    # Update layout
+    fig.update_layout(
+        title="Portfolio Drawdown Analysis",
+        xaxis_title="Date",
+        yaxis_title="Drawdown (%)",
+        height=500,
+        hovermode='x unified',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        yaxis=dict(
+            tickformat='.1f',
+            range=[None, 5]  # Start from 5% to show small drawdowns, auto-scale down for larger ones
+        )
+    )
+    
+    # Add horizontal line at 0%
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+    
+    return fig
+
+
 def create_weight_evolution_chart(weight_history):
     """Create portfolio weight evolution chart for backtest."""
     fig = go.Figure()
@@ -504,36 +595,6 @@ def create_rolling_metrics_chart(performance_data, window_days=252):
     
     return fig
 
-
-def create_drawdown_chart(performance_data):
-    """Create drawdown analysis chart."""
-    drawdowns = performance_data['drawdowns'] * 100  # Convert to percentage
-    
-    fig = go.Figure()
-    
-    # Drawdown area chart
-    fig.add_trace(go.Scatter(
-        x=drawdowns.index,
-        y=drawdowns,
-        fill='tonexty',
-        mode='lines',
-        name='Drawdown',
-        line=dict(color='red', width=1),
-        fillcolor='rgba(255, 0, 0, 0.3)'
-    ))
-    
-    # Add zero line
-    fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
-    
-    fig.update_layout(
-        title=f"Portfolio Drawdowns (Max: {performance_data['max_drawdown']:.1%})",
-        xaxis_title="Date", 
-        yaxis_title="Drawdown (%)",
-        height=300,
-        showlegend=False
-    )
-    
-    return fig
 
 
 def create_returns_comparison_chart(expected_returns, weights):
@@ -1072,6 +1133,14 @@ def main():
                         f"{spy_max_drawdown:.1%}",
                         f"{spy_drawdown_diff:+.1%} vs dynamic"
                     )
+                
+                # Drawdown Analysis Chart
+                st.markdown("---")
+                st.subheader("📉 Drawdown Analysis")
+                st.markdown("*Shows peak-to-trough declines for portfolios and individual assets*")
+                
+                drawdown_chart = create_drawdown_chart(backtest_results, data, result['weights'])
+                st.plotly_chart(drawdown_chart, use_container_width=True)
                 
                 # Note: Advanced rolling metrics charts removed - backtest provides comprehensive analysis
                 
