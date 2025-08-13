@@ -20,10 +20,12 @@ Port_Optimizer/
 ├── data/loader.py          # Yahoo Finance data (simple returns)
 ├── estimators.py           # Covariance matrix estimation only
 ├── optimizer.py            # Minimum variance optimization
+├── backtest.py             # Walk-forward backtesting engine
 ├── app.py                  # Streamlit dashboard
 ├── config.py               # Configuration parameters
 ├── test_phase1.py          # Simulated data validation
-└── test_streamlit.py       # Market data validation
+├── test_streamlit.py       # Market data validation
+└── test_backtest.py        # Backtest engine validation
 ```
 
 ## Core Methodology: Minimum Variance
@@ -38,9 +40,15 @@ Port_Optimizer/
 4. **Stable and robust** - covariance matrices are more stable than expected returns
 
 **Parameter Estimation (Breaking the Market windows):**
-- **σ (volatility)**: 60 days (medium adaptation)
-- **ρ (correlation)**: 30 days (fast adaptation)
+- **σ (volatility)**: 60 days (medium adaptation) - user configurable via UI sliders
+- **ρ (correlation)**: 30 days (fast adaptation) - user configurable via UI sliders  
 - **No μ needed** - eliminated from optimization
+
+**Walk-Forward Backtesting:**
+- **True historical analysis** - no look-ahead bias
+- **Weekly rebalancing** - realistic transaction costs
+- **Rolling window estimation** - uses only data available at each rebalancing date
+- **Performance comparison** - dynamic vs static vs SPY benchmark
 
 ## Development Guidelines
 
@@ -48,8 +56,9 @@ Port_Optimizer/
 
 1. **Always run tests** after modifications:
    ```bash
-   python test_phase1.py  # Core functionality
-   python test_streamlit.py  # Market data integration
+   python test_phase1.py      # Core functionality
+   python test_streamlit.py   # Market data integration
+   python test_backtest.py    # Walk-forward backtest engine
    ```
 
 2. **Follow existing patterns**:
@@ -67,7 +76,8 @@ Port_Optimizer/
 ### Critical Files:
 
 - **config.py**: All parameters - focused on minimum variance approach
-- **app.py**: Clean Streamlit interface showing diversification metrics
+- **app.py**: Clean Streamlit interface with walk-forward backtesting always enabled
+- **backtest.py**: Walk-forward backtesting engine with no look-ahead bias
 - **optimizer.py**: Core minimum variance optimization logic
 - **estimators.py**: Covariance matrix estimation (no expected returns)
 - **data/loader.py**: Simple returns (not log returns) - critical for correct optimization
@@ -113,9 +123,31 @@ This system has focused fallbacks:
 ### Performance Notes:
 
 - **Optimization**: ~10ms for 4 assets using SLSQP
-- **Memory**: Efficient - no complex backtesting needed
-- **UI**: Fast rendering with clean interface
+- **Backtesting**: Walk-forward analysis typically completes in 30-60 seconds
+- **Memory**: Efficient with caching for expensive backtest computations  
+- **UI**: Fast rendering with clean interface, parameter changes require full recomputation
 - **Stability**: Converges reliably, no solver issues
+
+## Current Application State (August 2025)
+
+**Major Features:**
+- **Always-on Walk-Forward Backtesting**: Replaced misleading perfect foresight analysis with realistic historical backtesting
+- **Interactive Rolling Windows**: Users can adjust volatility (σ) and correlation (ρ) estimation windows via UI sliders
+- **Comprehensive Performance Comparison**: Three-way comparison (Dynamic vs Static vs SPY) with full metrics
+- **Advanced Visualizations**: Portfolio weight evolution, performance charts, correlation heatmaps
+- **Realistic Cost Analysis**: Turnover tracking and rebalancing frequency metrics
+
+**User Interface:**
+- **Sidebar Controls**: Date range selection, rolling window parameters, rebalancing frequency
+- **Main Dashboard**: Current portfolio weights, expected returns (display only), historical analysis
+- **Performance Sections**: Dynamic comparison, static portfolio, SPY benchmark (5 columns each)
+- **Charts**: Weight evolution (with correct hover tooltips), performance comparison, correlation matrix
+
+**Technical Implementation:**
+- **Caching**: Expensive backtest computations cached for 1 hour with smart cache keys
+- **Data Pipeline**: Extended historical data fetching for proper rolling windows
+- **Error Handling**: Graceful fallbacks for optimization failures and data issues
+- **Parameter Validation**: Rolling windows properly passed through entire backtest pipeline
 
 ## Key Metrics and Validation
 
@@ -145,6 +177,28 @@ This system has focused fallbacks:
 - **Impact**: Focuses optimization on risky assets only
 - **File**: config.py, optimizer.py
 
+**Rolling Window Parameters Not Applied in Backtest (SOLVED):**
+- **Problem**: Changing correlation/volatility windows in UI had no effect on backtest results
+- **Root Cause**: `walk_forward_backtest()` used hardcoded config values instead of user parameters
+- **Solution**: Added `sigma_window` and `rho_window` parameters to backtest function and pipeline
+- **Impact**: Rolling window sliders now dramatically affect portfolio allocation and performance
+- **Files**: backtest.py, app.py
+- **Validation**: Extreme window differences show 20%+ allocation changes and 8%+ return differences
+
+**Portfolio Weight Evolution Chart Display Issues (SOLVED):**
+- **Problem**: Stacked area chart showed incorrect cumulative values in hover tooltips
+- **Root Cause**: Plotly stackgroup approach caused rendering issues with TLT and GLD areas
+- **Solution**: Reimplemented using explicit polygon fills with custom hover templates  
+- **Impact**: Visual areas now match numerical weights exactly, hover shows individual weights
+- **File**: app.py create_weight_evolution_chart()
+
+**Performance Comparison UI Improvements (COMPLETED):**
+- **Added**: Annualized return metrics to all three portfolio comparison sections
+- **Removed**: Redundant metrics (turnover, beta, rebalancing activity)  
+- **Improved**: Consistent 5-column layout for Dynamic, Static, and SPY portfolios
+- **Enhanced**: Color-coded delta comparisons for all metrics
+- **File**: app.py performance comparison sections
+
 ## Maintenance Tasks
 
 ### Regular:
@@ -166,7 +220,7 @@ This system has focused fallbacks:
 
 ## Known Issues & Workarounds
 
-1. **Cash optimization bias**
+1. **Cash optimization bias (SOLVED)**
    - **Solution**: `EXCLUDE_CASH_FROM_OPTIMIZATION = True` in config
    
 2. **Yahoo Finance data structure changes**
@@ -174,6 +228,11 @@ This system has focused fallbacks:
    
 3. **Correlation estimation with limited data**
    - **Solution**: Fallback to reasonable windows, handle NaN correlations
+
+4. **UI scroll position resets on parameter changes**
+   - **Limitation**: Streamlit framework behavior - parameter changes require full page recomputation
+   - **Workaround**: Users should expect to scroll back to results section after adjusting windows
+   - **Considered**: Anchor links, manual update buttons - deemed too complex for benefit
 
 ## Development Environment
 

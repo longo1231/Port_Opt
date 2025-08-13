@@ -20,15 +20,10 @@ from config import (
     ASSETS, RISK_FREE_RATE as DEFAULT_RISK_FREE_RATE, 
     TRADING_DAYS_PER_YEAR
 )
-# Legacy simulation parameters (not used in simple version)
-DEFAULT_SIM_MU = np.array([0.08, 0.03, 0.05, 0.02])
-DEFAULT_SIM_SIGMA = np.array([0.16, 0.05, 0.20, 0.001]) 
-DEFAULT_SIM_CORR = np.array([
-    [1.00, -0.25, 0.30, 0.00],
-    [-0.25, 1.00, -0.10, 0.00], 
-    [0.30, -0.10, 1.00, 0.00],
-    [0.00, 0.00, 0.00, 1.00]
-])
+# Default simulation parameters for risky assets only (SPY, TLT, GLD)
+DEFAULT_SIM_MU = np.array([0.08, 0.03, 0.05])  # SPY, TLT, GLD
+DEFAULT_SIM_SIGMA = np.array([0.16, 0.05, 0.20])  # SPY, TLT, GLD 
+DEFAULT_SIM_CORR = 0.2  # Use scalar correlation for simplicity
 
 
 class DataLoader:

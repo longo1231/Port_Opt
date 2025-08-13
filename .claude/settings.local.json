@@ -7,7 +7,9 @@
       "Bash(grep:*)",
       "Bash(pkill:*)",
       "Bash(rm:*)",
-      "Bash(streamlit run:*)"
+      "Bash(streamlit run:*)",
+      "Bash(kill:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }
