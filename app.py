@@ -334,6 +334,92 @@ def create_backtest_performance_chart(backtest_results, original_data, static_we
     return fig
 
 
+def create_rolling_metrics_chart(backtest_results, window_days=30):
+    """Create rolling Sharpe ratio and volatility chart for dynamic portfolio."""
+    
+    # Get dynamic portfolio returns
+    dynamic_returns = backtest_results['portfolio_returns']
+    
+    if len(dynamic_returns) < window_days:
+        # Not enough data for rolling calculation
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Insufficient data for {window_days}-day rolling metrics<br>Need at least {window_days} days, have {len(dynamic_returns)}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False
+        )
+        fig.update_layout(
+            title="Rolling Risk Metrics - Insufficient Data",
+            height=400
+        )
+        return fig
+    
+    # Calculate rolling metrics
+    rolling_vol = dynamic_returns.rolling(window=window_days).std() * np.sqrt(252) * 100  # Annualized %
+    rolling_mean = dynamic_returns.rolling(window=window_days).mean() * 252  # Annualized return
+    rolling_sharpe = rolling_mean / (rolling_vol / 100)  # Sharpe ratio
+    
+    # Remove NaN values
+    rolling_vol = rolling_vol.dropna()
+    rolling_sharpe = rolling_sharpe.dropna()
+    
+    # Create figure with secondary y-axis
+    fig = go.Figure()
+    
+    # Add rolling volatility (primary y-axis)
+    fig.add_trace(go.Scatter(
+        x=rolling_vol.index,
+        y=rolling_vol,
+        mode='lines',
+        name='Rolling Volatility',
+        line=dict(color='#E74C3C', width=2),
+        hovertemplate='<b>Volatility</b><br>Vol: %{y:.1f}%<extra></extra>',
+        yaxis='y'
+    ))
+    
+    # Add rolling Sharpe ratio (secondary y-axis)  
+    fig.add_trace(go.Scatter(
+        x=rolling_sharpe.index,
+        y=rolling_sharpe,
+        mode='lines',
+        name='Rolling Sharpe Ratio',
+        line=dict(color='#3498DB', width=2),
+        hovertemplate='<b>Sharpe Ratio</b><br>Sharpe: %{y:.2f}<extra></extra>',
+        yaxis='y2'
+    ))
+    
+    # Update layout with dual y-axes
+    fig.update_layout(
+        title=f"Dynamic Portfolio Rolling Risk Metrics ({window_days}-Day Window)",
+        xaxis_title="Date",
+        height=400,
+        hovermode='x unified',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        yaxis=dict(
+            title="Volatility (%)",
+            side="left",
+            color='#E74C3C',
+            tickformat='.1f'
+        ),
+        yaxis2=dict(
+            title="Sharpe Ratio",
+            side="right",
+            overlaying="y",
+            color='#3498DB',
+            tickformat='.2f',
+            dtick=1  # Show increments of 1
+        )
+    )
+    
+    return fig
+
+
 def create_drawdown_chart(backtest_results, data, static_weights):
     """Create comprehensive drawdown chart for all portfolios and individual assets."""
     fig = go.Figure()
@@ -365,7 +451,7 @@ def create_drawdown_chart(backtest_results, data, static_weights):
             mode='lines',
             name='Dynamic Portfolio',
             line=dict(color=colors['Dynamic Portfolio'], width=2),
-            hovertemplate='<b>Dynamic Portfolio</b><br>Date: %{x}<br>Drawdown: %{y:.2f}%<extra></extra>'
+            hovertemplate='<b>Dynamic Portfolio</b><br>Drawdown: %{y:.2f}%<extra></extra>'
         ))
     
     # 2. Static Portfolio Drawdown
@@ -380,7 +466,7 @@ def create_drawdown_chart(backtest_results, data, static_weights):
         mode='lines',
         name='Static Portfolio',
         line=dict(color=colors['Static Portfolio'], width=2),
-        hovertemplate='<b>Static Portfolio</b><br>Date: %{x}<br>Drawdown: %{y:.2f}%<extra></extra>'
+        hovertemplate='<b>Static Portfolio</b><br>Drawdown: %{y:.2f}%<extra></extra>'
     ))
     
     # 3. Individual Assets Drawdowns
@@ -396,7 +482,7 @@ def create_drawdown_chart(backtest_results, data, static_weights):
             mode='lines',
             name=asset,
             line=dict(color=colors[asset], width=1.5, dash='dot'),
-            hovertemplate=f'<b>{asset}</b><br>Date: %{{x}}<br>Drawdown: %{{y:.2f}}%<extra></extra>'
+            hovertemplate=f'<b>{asset}</b><br>Drawdown: %{{y:.2f}}%<extra></extra>'
         ))
     
     # Update layout
@@ -553,47 +639,6 @@ def create_weight_evolution_chart(weight_history):
     
     return fig
 
-
-def create_rolling_metrics_chart(performance_data, window_days=252):
-    """Create rolling Sharpe ratio and volatility chart."""
-    portfolio_returns = performance_data['portfolio_daily_returns']
-    
-    # Calculate rolling metrics
-    rolling_sharpe = (portfolio_returns.rolling(window_days).mean() * 252) / (portfolio_returns.rolling(window_days).std() * np.sqrt(252))
-    rolling_vol = portfolio_returns.rolling(window_days).std() * np.sqrt(252)
-    
-    fig = go.Figure()
-    
-    # Rolling Sharpe ratio
-    fig.add_trace(go.Scatter(
-        x=rolling_sharpe.index,
-        y=rolling_sharpe,
-        mode='lines',
-        name='Rolling Sharpe Ratio (1Y)',
-        line=dict(color='blue', width=2),
-        yaxis='y'
-    ))
-    
-    # Rolling volatility on secondary y-axis
-    fig.add_trace(go.Scatter(
-        x=rolling_vol.index,
-        y=rolling_vol * 100,  # Convert to percentage
-        mode='lines',
-        name='Rolling Volatility (1Y)',
-        line=dict(color='orange', width=2),
-        yaxis='y2'
-    ))
-    
-    fig.update_layout(
-        title="Rolling Risk-Adjusted Performance (1-Year Window)",
-        xaxis_title="Date",
-        yaxis=dict(title="Sharpe Ratio", side="left"),
-        yaxis2=dict(title="Volatility (%)", side="right", overlaying="y"),
-        height=400,
-        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
-    )
-    
-    return fig
 
 
 
@@ -1141,6 +1186,14 @@ def main():
                 
                 drawdown_chart = create_drawdown_chart(backtest_results, data, result['weights'])
                 st.plotly_chart(drawdown_chart, use_container_width=True)
+                
+                # Rolling Risk Metrics Chart
+                st.markdown("---")
+                st.subheader("📊 Rolling Risk Metrics")
+                st.markdown("*60-day rolling volatility and Sharpe ratio for dynamic portfolio*")
+                
+                rolling_metrics_chart = create_rolling_metrics_chart(backtest_results, window_days=60)
+                st.plotly_chart(rolling_metrics_chart, use_container_width=True)
                 
                 # Note: Advanced rolling metrics charts removed - backtest provides comprehensive analysis
                 
