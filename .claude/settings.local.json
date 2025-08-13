@@ -9,7 +9,11 @@
       "Bash(rm:*)",
       "Bash(streamlit run:*)",
       "Bash(kill:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(lsof:*)",
+      "Bash(sed:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }

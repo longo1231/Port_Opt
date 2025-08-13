@@ -15,6 +15,178 @@ from scipy.optimize import minimize
 from config import MIN_WEIGHT
 
 
+def optimize_min_variance_risky_only(risky_covariance_matrix):
+    """
+    Optimize minimum variance portfolio using only risky assets.
+    
+    This function is used for leverage calculations where we need the optimal
+    allocation among risky assets only (weights sum to 1.0), before applying
+    leverage and determining cash position.
+    
+    Parameters
+    ----------
+    risky_covariance_matrix : np.ndarray or pd.DataFrame
+        Covariance matrix for risky assets only (e.g., 3x3 for SPY, TLT, GLD)
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'success': bool, whether optimization succeeded
+        - 'weights': np.ndarray, optimal weights for risky assets (sum to 1.0)
+        - 'portfolio_volatility': float, annualized volatility of risky portfolio
+        - 'error': str, error message if optimization failed
+    """
+    try:
+        # Convert to numpy if DataFrame
+        if hasattr(risky_covariance_matrix, 'values'):
+            cov_matrix = risky_covariance_matrix.values
+        else:
+            cov_matrix = risky_covariance_matrix
+            
+        n_assets = cov_matrix.shape[0]
+        
+        # Objective: minimize w'Σw (portfolio variance)
+        def objective(weights):
+            return weights.T @ cov_matrix @ weights
+            
+        # Constraint: weights sum to 1 (fully invested in risky assets)
+        constraints = [{'type': 'eq', 'fun': lambda w: np.sum(w) - 1.0}]
+        
+        # Bounds: long-only positions (0 ≤ w ≤ 1)
+        bounds = [(0.0, 1.0) for _ in range(n_assets)]
+        
+        # Initial guess: equal weights
+        initial_weights = np.array([1.0/n_assets] * n_assets)
+        
+        # Optimize
+        result = minimize(
+            objective,
+            initial_weights,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=constraints,
+            options={'ftol': 1e-9}
+        )
+        
+        if result.success:
+            weights = result.x
+            portfolio_volatility = np.sqrt(weights.T @ cov_matrix @ weights)
+            
+            return {
+                'success': True,
+                'weights': weights,
+                'portfolio_volatility': portfolio_volatility,
+                'error': None
+            }
+        else:
+            return {
+                'success': False,
+                'weights': initial_weights,
+                'portfolio_volatility': 0.0,
+                'error': f"Optimization failed: {result.message}"
+            }
+            
+    except Exception as e:
+        n_assets = risky_covariance_matrix.shape[0]
+        return {
+            'success': False,
+            'weights': np.array([1.0/n_assets] * n_assets),
+            'portfolio_volatility': 0.0,
+            'error': f"Optimization error: {str(e)}"
+        }
+
+
+def calculate_leveraged_portfolio(risky_covariance_matrix, target_volatility, max_leverage=3.0):
+    """
+    Calculate leveraged portfolio to achieve target volatility.
+    
+    This implements the 6-step process:
+    1. Optimize minimum variance on risky assets only
+    2. Calculate MVP volatility 
+    3. Determine required leverage
+    4. Cap leverage at maximum
+    5. Calculate final weights (risky assets scaled, cash = 1 - leverage)
+    6. Return results with leverage info
+    
+    Parameters
+    ----------
+    risky_covariance_matrix : np.ndarray
+        Covariance matrix for risky assets only
+    target_volatility : float
+        Desired portfolio volatility (e.g., 0.10 for 10%)
+    max_leverage : float, default 3.0
+        Maximum allowed leverage ratio
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'success': bool, whether calculation succeeded
+        - 'final_weights': np.ndarray, final portfolio weights [SPY, TLT, GLD, Cash]
+        - 'calculated_leverage': float, actual leverage applied
+        - 'mvp_volatility': float, volatility of minimum variance risky portfolio
+        - 'final_volatility': float, final portfolio volatility (should match target)
+        - 'risky_weights': np.ndarray, optimal weights for risky assets only
+        - 'error': str, error message if failed
+    """
+    try:
+        # Step 1 & 2: Optimize risky assets and get MVP volatility
+        mvp_result = optimize_min_variance_risky_only(risky_covariance_matrix)
+        
+        if not mvp_result['success']:
+            return {
+                'success': False,
+                'final_weights': np.array([0.33, 0.33, 0.34, 0.0]),  # Equal weight fallback
+                'calculated_leverage': 1.0,
+                'mvp_volatility': 0.0,
+                'final_volatility': 0.0,
+                'risky_weights': np.array([0.33, 0.33, 0.34]),
+                'error': f"MVP optimization failed: {mvp_result['error']}"
+            }
+        
+        risky_weights = mvp_result['weights']
+        mvp_volatility = mvp_result['portfolio_volatility']
+        
+        # Step 3 & 4: Calculate leverage with cap
+        if mvp_volatility <= 1e-8:  # Avoid division by zero
+            calculated_leverage = 1.0
+        else:
+            calculated_leverage = min(target_volatility / mvp_volatility, max_leverage)
+        
+        # Step 5: Calculate final weights
+        final_risky_weights = risky_weights * calculated_leverage
+        final_cash_weight = 1.0 - calculated_leverage
+        
+        # Combine into full portfolio weights [SPY, TLT, GLD, Cash]
+        final_weights = np.append(final_risky_weights, final_cash_weight)
+        
+        # Calculate actual final portfolio volatility
+        # For leveraged portfolio: vol = leverage * mvp_vol
+        final_volatility = calculated_leverage * mvp_volatility
+        
+        return {
+            'success': True,
+            'final_weights': final_weights,
+            'calculated_leverage': calculated_leverage,
+            'mvp_volatility': mvp_volatility,
+            'final_volatility': final_volatility,
+            'risky_weights': risky_weights,
+            'error': None
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'final_weights': np.array([0.33, 0.33, 0.34, 0.0]),
+            'calculated_leverage': 1.0,
+            'mvp_volatility': 0.0,
+            'final_volatility': 0.0,
+            'risky_weights': np.array([0.33, 0.33, 0.34]),
+            'error': f"Leverage calculation error: {str(e)}"
+        }
+
+
 def optimize_min_variance(covariance_matrix: np.ndarray, exclude_cash: bool = True) -> dict:
     """
     Find the portfolio with minimum possible variance.

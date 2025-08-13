@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 import warnings
 
 from estimators import estimate_covariance_matrix
-from optimizer import optimize_min_variance, analyze_min_variance_portfolio
+from optimizer import optimize_min_variance, analyze_min_variance_portfolio, calculate_leveraged_portfolio
 from config import ASSETS, SIGMA_WINDOW, RHO_WINDOW, TRADING_DAYS_PER_YEAR
 
 
@@ -102,7 +102,8 @@ def calculate_period_performance(returns_data: pd.DataFrame, weights: np.ndarray
 
 def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date: str,
                          rebalance_freq: str = 'weekly', min_history_days: int = None,
-                         sigma_window: int = None, rho_window: int = None) -> Dict:
+                         sigma_window: int = None, rho_window: int = None, 
+                         target_volatility: float = None) -> Dict:
     """
     Execute walk-forward backtest with periodic rebalancing.
     
@@ -209,6 +210,29 @@ def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date:
                 print(f"Optimization failed on {rebal_date}, using equal weights")
             else:
                 weights = optimization_result['weights']
+                
+                # Apply leverage if target volatility is specified
+                if target_volatility is not None and target_volatility > 0:
+                    try:
+                        # Extract risky covariance matrix (SPY, TLT, GLD only)
+                        risky_cov_matrix = covariance_matrix[:3, :3]
+                        
+                        # Calculate leveraged portfolio
+                        leverage_result = calculate_leveraged_portfolio(
+                            risky_cov_matrix, 
+                            target_volatility, 
+                            max_leverage=3.0
+                        )
+                        
+                        if leverage_result['success']:
+                            weights = leverage_result['final_weights']
+                        else:
+                            print(f"Leverage calculation failed on {rebal_date}: {leverage_result['error']}")
+                            # Keep original weights as fallback
+                            
+                    except Exception as lever_e:
+                        print(f"Leverage error on {rebal_date}: {lever_e}")
+                        # Keep original weights as fallback
                 
         except Exception as e:
             optimization_errors.append({

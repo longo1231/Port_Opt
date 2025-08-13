@@ -14,9 +14,11 @@ This application implements minimum variance portfolio optimization for SPY, TLT
 ### Core Features
 
 - **Minimum Variance Optimization**: `min w^T Σ w` (no expected returns needed)
+- **🎯 Volatility Targeting with Leverage**: Professional-grade leverage system (NEW!)
 - **Natural Diversification**: Only way to reduce risk is through correlation benefits
 - **Stable Results**: Covariance matrices are more stable than expected returns
 - **Real-time Data**: Yahoo Finance integration with robust error handling
+- **Revolutionary Visualizations**: See exactly how leverage works
 - **Clean Interface**: Clear visualization of diversification benefits
 
 ## 🚀 Quick Start
@@ -91,13 +93,73 @@ min w^T Σ w
 - Long-only: w ≥ 0
 - Exclude Cash: Optimize only risky assets
 
+## 🎯 Leverage Feature: Volatility Targeting
+
+### What is Volatility Targeting?
+
+The leverage system allows you to specify a **target portfolio volatility** (1-25%) and automatically applies leverage to achieve it:
+
+```
+Leverage = Target_Volatility ÷ MVP_Volatility (capped at 3x)
+```
+
+**Example**: If your minimum variance portfolio has 8% volatility but you want 12%:
+- **Leverage applied**: 12% ÷ 8% = 1.5x
+- **Result**: All risky assets scaled by 1.5x, cash becomes -50% (borrowed)
+
+### UI Controls
+
+**⚙️ Optimization Parameters** (all in sidebar):
+- **Volatility Window**: 10-252 days (σ estimation)
+- **Correlation Window**: 5-120 days (ρ estimation)
+- **Target Volatility**: 1-25% slider 🎯
+- **"No Leverage" Checkbox**: Forces Cash = 0%, disables slider
+
+**⚡ Smart Behavior**:
+- Slider automatically **disables** when "No Leverage" is checked
+- Real-time leverage calculation and display
+- Dynamic feedback showing applied leverage ratio
+
+### Revolutionary Visualizations
+
+**📈 Portfolio Weight Evolution Chart**:
+- **Cash moved to bottom** of stack (can go negative!)
+- **Red area below 0%** = borrowed amount
+- **Dynamic Y-axis** accommodates negative values
+- **Reference line at 0%** for clear visual guidance
+
+**📊 Portfolio Weights Chart**:
+- **Leverage ratio** displayed in title
+- **Negative cash annotation** with arrow
+- **"Borrowed: X%" indicator** for leveraged positions
+
+### Example Scenarios
+
+**🔳 No Leverage (checkbox checked)**:
+- Cash: exactly 0%
+- SPY + TLT + GLD = 100%
+- Target volatility ignored
+
+**📈 Moderate Leverage (15% target, 10% MVP)**:
+- Leverage: 1.5x
+- SPY: 45%, TLT: 52%, GLD: 33%
+- Cash: -30% (borrowed to fund positions)
+- **Visual**: Red area extends 30% below 0% line
+
+**⚡ High Leverage (20% target, 8% MVP, capped at 3x)**:
+- Leverage: 2.5x (reasonable limit applied)
+- All risky positions scaled significantly
+- Cash: -150% (substantial borrowing)
+- **Visual**: Deep red area below 0%, risky assets well above 100%
+
 ## 📊 Dashboard Features
 
 ### Key Visualizations
-- **Portfolio Weights**: Bar chart showing diversified allocation
-- **Correlation Matrix**: Real-time correlation heatmap
+- **Portfolio Weights**: Bar chart with leverage ratio and negative cash support
+- **Weight Evolution**: Revolutionary chart showing leverage over time (cash can go negative!)
+- **Correlation Matrix**: Real-time correlation heatmap (risky assets only)
 - **Risk Analysis**: Risk contributions vs portfolio weights
-- **Volatility Comparison**: Individual vs portfolio volatility
+- **Volatility Comparison**: Shows unleveraged MVP volatility vs individual assets
 
 ### Diversification Metrics
 - **Diversification Ratio**: Weighted avg vol / portfolio vol (>1 = diversification benefit)

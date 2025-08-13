@@ -16,15 +16,15 @@ import pickle
 
 from data.loader import DataLoader
 from estimators import estimate_covariance_matrix, estimate_expected_returns, get_estimation_info
-from optimizer import optimize_min_variance, analyze_min_variance_portfolio
+from optimizer import optimize_min_variance, analyze_min_variance_portfolio, calculate_leveraged_portfolio
 from backtest import walk_forward_backtest, compare_with_static_weights
 from config import ASSETS, DEFAULT_DATE_RANGE_YEARS, SIGMA_WINDOW, RHO_WINDOW
 
 
-def get_data_hash(data, start_str, end_str, sigma_window, rho_window, rebalance_freq):
+def get_data_hash(data, start_str, end_str, sigma_window, rho_window, rebalance_freq, target_volatility=None, no_leverage=False):
     """Generate a hash for caching based on data and parameters."""
     # Create a string representation of key parameters
-    cache_key = f"{start_str}_{end_str}_{sigma_window}_{rho_window}_{rebalance_freq}"
+    cache_key = f"{start_str}_{end_str}_{sigma_window}_{rho_window}_{rebalance_freq}_{target_volatility}_{no_leverage}"
     
     # Add data hash (sample of data to avoid large computation)
     data_sample = data.iloc[::max(1, len(data)//100)]  # Sample every 1% of data
@@ -34,7 +34,7 @@ def get_data_hash(data, start_str, end_str, sigma_window, rho_window, rebalance_
 
 
 @st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
-def get_cached_backtest_result(cache_key, data_pickle, start_str, end_str, rebalance_freq, min_history_days, sigma_window, rho_window):
+def get_cached_backtest_result(cache_key, data_pickle, start_str, end_str, rebalance_freq, min_history_days, sigma_window, rho_window, target_volatility=None, no_leverage=False):
     """
     Cached backtest execution. Returns cached result if available, otherwise computes new result.
     """
@@ -47,22 +47,27 @@ def get_cached_backtest_result(cache_key, data_pickle, start_str, end_str, rebal
         rebalance_freq=rebalance_freq,
         min_history_days=min_history_days,
         sigma_window=sigma_window,
-        rho_window=rho_window
+        rho_window=rho_window,
+        target_volatility=None if no_leverage else target_volatility
     )
 
 
 def create_correlation_heatmap(covariance_matrix):
-    """Create correlation matrix heatmap."""
-    volatilities = np.sqrt(np.diag(covariance_matrix))
-    corr_matrix = covariance_matrix / np.outer(volatilities, volatilities)
+    """Create correlation matrix heatmap for risky assets only (excludes Cash)."""
+    # Extract only risky assets (exclude Cash - last row/column)
+    risky_cov_matrix = covariance_matrix[:-1, :-1]
+    risky_assets = ASSETS[:-1]  # Exclude 'Cash'
+    
+    volatilities = np.sqrt(np.diag(risky_cov_matrix))
+    corr_matrix = risky_cov_matrix / np.outer(volatilities, volatilities)
     
     # Format text for display
     text_array = [[f"{val:.3f}" for val in row] for row in corr_matrix]
     
     fig = go.Figure(data=go.Heatmap(
         z=corr_matrix,
-        x=ASSETS,
-        y=ASSETS,
+        x=risky_assets,
+        y=risky_assets,
         colorscale='RdBu_r',
         zmid=0,
         text=text_array,
@@ -72,17 +77,18 @@ def create_correlation_heatmap(covariance_matrix):
     ))
     
     fig.update_layout(
-        title="Asset Correlation Matrix",
+        title="Risky Asset Correlation Matrix",
         height=400
     )
     
     return fig
 
 
-def create_weights_chart(weights, diversification_ratio, effective_assets):
-    """Create portfolio weights bar chart."""
+def create_weights_chart(weights, diversification_ratio, effective_assets, leverage=None):
+    """Create portfolio weights bar chart with support for negative cash (leveraged positions)."""
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']  # Blue, Orange, Green, Red
     
+    # Create the bar chart
     fig = go.Figure(data=go.Bar(
         x=ASSETS,
         y=weights * 100,
@@ -91,14 +97,38 @@ def create_weights_chart(weights, diversification_ratio, effective_assets):
         textposition='auto'
     ))
     
+    # Add title with leverage information if applicable
+    title_text = "Minimum Variance Portfolio Weights<br>"
+    if leverage is not None and leverage != 1.0:
+        title_text += f"<sub>Leverage: {leverage:.2f}x | Diversification Ratio: {diversification_ratio:.2f} | " + \
+                     f"Effective Assets: {effective_assets:.1f}</sub>"
+    else:
+        title_text += f"<sub>Diversification Ratio: {diversification_ratio:.2f} | " + \
+                     f"Effective Assets: {effective_assets:.1f}</sub>"
+    
     fig.update_layout(
-        title=f"Minimum Variance Portfolio Weights<br>" + 
-              f"<sub>Diversification Ratio: {diversification_ratio:.2f} | " +
-              f"Effective Assets: {effective_assets:.1f}</sub>",
+        title=title_text,
         xaxis_title="Assets",
         yaxis_title="Weight (%)",
         height=400
     )
+    
+    # Add horizontal line at 0% for clarity when cash is negative
+    fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
+    
+    # Add annotation for negative cash if applicable
+    cash_weight = weights[-1] * 100  # Cash is last asset
+    if cash_weight < -1:  # If significantly negative (leveraged)
+        fig.add_annotation(
+            x="Cash", y=cash_weight,
+            text=f"Borrowed: {abs(cash_weight):.1f}%",
+            showarrow=True,
+            arrowhead=2,
+            arrowcolor="red",
+            arrowsize=1,
+            arrowwidth=2,
+            ax=0, ay=-40
+        )
     
     return fig
 
@@ -153,7 +183,7 @@ def create_risk_contribution_chart(analysis_data, covariance_matrix):
     return fig
 
 
-def create_volatility_comparison_chart(analysis_data, sigma_window):
+def create_volatility_comparison_chart(analysis_data, sigma_window, unleveraged_vol=None):
     """Compare individual vs portfolio-weighted volatilities with window volatility annotations."""
     assets = [item['asset'] for item in analysis_data['asset_analysis'] if item['weight'] > 0.001]
     individual_vols = [item['individual_vol'] * 100 for item in analysis_data['asset_analysis'] if item['weight'] > 0.001]
@@ -161,7 +191,14 @@ def create_volatility_comparison_chart(analysis_data, sigma_window):
     
     # Calculate weighted average volatility
     weighted_avg_vol = sum(w * vol for w, vol in zip(weights, individual_vols))
-    portfolio_vol = analysis_data['portfolio_volatility'] * 100
+    
+    # Use unleveraged volatility if provided, otherwise use current portfolio volatility
+    if unleveraged_vol is not None:
+        portfolio_vol = unleveraged_vol * 100
+        vol_label = "MVP (Unleveraged)"
+    else:
+        portfolio_vol = analysis_data['portfolio_volatility'] * 100
+        vol_label = "Portfolio (Window)"
     
     fig = go.Figure()
     
@@ -190,7 +227,7 @@ def create_volatility_comparison_chart(analysis_data, sigma_window):
         y=portfolio_vol,
         line_dash="solid",
         line_color="red",
-        annotation_text=f"Portfolio: {portfolio_vol:.1f}% (Window)",
+        annotation_text=f"Portfolio: {portfolio_vol:.1f}% ({vol_label})",
         annotation_position="bottom right"
     )
     
@@ -512,52 +549,82 @@ def create_drawdown_chart(backtest_results, data, static_weights):
 
 
 def create_weight_evolution_chart(weight_history):
-    """Create portfolio weight evolution chart for backtest."""
+    """Create portfolio weight evolution chart with Cash at bottom (can go negative)."""
     fig = go.Figure()
     
     # Convert weight history to DataFrame for easier plotting
     weight_df = weight_history.set_index('date')
     
-    # Colors for each asset
-    colors = {'SPY': '#1f77b4', 'TLT': '#ff7f0e', 'GLD': '#2ca02c', 'Cash': '#d62728'}
+    # Colors for each asset (reordered with Cash first for bottom placement)
+    colors = {'Cash': '#d62728', 'SPY': '#1f77b4', 'TLT': '#ff7f0e', 'GLD': '#2ca02c'}
     
-    # Create stacked area chart using explicit fill approach
-    # SPY: Fill from 0 to SPY%
+    # New stacking order: Cash (bottom, can be negative) → SPY → TLT → GLD (top)
+    
+    # Cash: Fill from 0 to Cash% (can be negative)
     fig.add_trace(go.Scatter(
         x=weight_df.index,
-        y=weight_df['SPY'] * 100,
+        y=weight_df['Cash'] * 100,
         mode='lines',
-        name='SPY',
+        name='Cash',
         fill='tozeroy',
-        line=dict(color=colors['SPY'], width=1),
-        fillcolor=colors['SPY'],
-        hovertemplate='<b>SPY</b>: %{y:.1f}%<extra></extra>'
+        line=dict(color=colors['Cash'], width=1),
+        fillcolor=colors['Cash'],
+        hovertemplate='<b>Cash</b>: %{y:.1f}%<extra></extra>'
     ))
     
-    # TLT: Fill between SPY and SPY+TLT
-    spy_cumulative = weight_df['SPY'] * 100
-    tlt_cumulative = (weight_df['SPY'] + weight_df['TLT']) * 100
+    # SPY: Fill between Cash and Cash+SPY
+    cash_cumulative = weight_df['Cash'] * 100
+    spy_cumulative = (weight_df['Cash'] + weight_df['SPY']) * 100
     
-    # Create TLT area by combining upper and lower bounds
     x_vals = list(weight_df.index) + list(reversed(weight_df.index))
-    y_vals = list(tlt_cumulative) + list(reversed(spy_cumulative))
+    y_vals = list(spy_cumulative) + list(reversed(cash_cumulative))
     
     fig.add_trace(go.Scatter(
         x=x_vals,
         y=y_vals,
+        mode='lines',
+        name='SPY',
+        fill='toself',
+        line=dict(color=colors['SPY'], width=0),
+        fillcolor=colors['SPY'],
+        showlegend=True,
+        hoverinfo='skip'
+    ))
+    
+    # Add invisible line for SPY hover
+    fig.add_trace(go.Scatter(
+        x=weight_df.index,
+        y=(cash_cumulative + weight_df['SPY']/2 * 100),
+        mode='lines',
+        name='SPY_hover',
+        line=dict(color='rgba(0,0,0,0)', width=0),
+        showlegend=False,
+        customdata=weight_df['SPY'] * 100,
+        hovertemplate='<b>SPY</b>: %{customdata:.1f}%<extra></extra>'
+    ))
+    
+    # TLT: Fill between Cash+SPY and Cash+SPY+TLT
+    tlt_cumulative = (weight_df['Cash'] + weight_df['SPY'] + weight_df['TLT']) * 100
+    
+    x_vals_tlt = list(weight_df.index) + list(reversed(weight_df.index))
+    y_vals_tlt = list(tlt_cumulative) + list(reversed(spy_cumulative))
+    
+    fig.add_trace(go.Scatter(
+        x=x_vals_tlt,
+        y=y_vals_tlt,
         mode='lines',
         name='TLT',
         fill='toself',
         line=dict(color=colors['TLT'], width=0),
         fillcolor=colors['TLT'],
         showlegend=True,
-        hoverinfo='skip'  # We'll add hover info separately
+        hoverinfo='skip'
     ))
     
     # Add invisible line for TLT hover
     fig.add_trace(go.Scatter(
         x=weight_df.index,
-        y=(weight_df['SPY'] + weight_df['TLT']/2) * 100,  # Middle of TLT area
+        y=(spy_cumulative + weight_df['TLT']/2 * 100),
         mode='lines',
         name='TLT_hover',
         line=dict(color='rgba(0,0,0,0)', width=0),
@@ -566,8 +633,8 @@ def create_weight_evolution_chart(weight_history):
         hovertemplate='<b>TLT</b>: %{customdata:.1f}%<extra></extra>'
     ))
     
-    # GLD: Fill between SPY+TLT and SPY+TLT+GLD
-    gld_cumulative = (weight_df['SPY'] + weight_df['TLT'] + weight_df['GLD']) * 100
+    # GLD: Fill between Cash+SPY+TLT and Cash+SPY+TLT+GLD (top)
+    gld_cumulative = (weight_df['Cash'] + weight_df['SPY'] + weight_df['TLT'] + weight_df['GLD']) * 100
     
     x_vals_gld = list(weight_df.index) + list(reversed(weight_df.index))
     y_vals_gld = list(gld_cumulative) + list(reversed(tlt_cumulative))
@@ -587,7 +654,7 @@ def create_weight_evolution_chart(weight_history):
     # Add invisible line for GLD hover
     fig.add_trace(go.Scatter(
         x=weight_df.index,
-        y=(tlt_cumulative + weight_df['GLD']/2 * 100),  # Middle of GLD area
+        y=(tlt_cumulative + weight_df['GLD']/2 * 100),
         mode='lines',
         name='GLD_hover',
         line=dict(color='rgba(0,0,0,0)', width=0),
@@ -596,45 +663,32 @@ def create_weight_evolution_chart(weight_history):
         hovertemplate='<b>GLD</b>: %{customdata:.1f}%<extra></extra>'
     ))
     
-    if weight_df['Cash'].max() > 0.001:  # Only show Cash if it has meaningful allocation
-        # Cash: Fill between SPY+TLT+GLD and 100%
-        cash_cumulative = (weight_df['SPY'] + weight_df['TLT'] + weight_df['GLD'] + weight_df['Cash']) * 100
-        
-        x_vals_cash = list(weight_df.index) + list(reversed(weight_df.index))
-        y_vals_cash = list(cash_cumulative) + list(reversed(gld_cumulative))
-        
-        fig.add_trace(go.Scatter(
-            x=x_vals_cash,
-            y=y_vals_cash,
-            mode='lines',
-            name='Cash',
-            fill='toself',
-            line=dict(color=colors['Cash'], width=0),
-            fillcolor=colors['Cash'],
-            showlegend=True,
-            hoverinfo='skip'
-        ))
-        
-        # Add invisible line for Cash hover
-        fig.add_trace(go.Scatter(
-            x=weight_df.index,
-            y=(gld_cumulative + weight_df['Cash']/2 * 100),  # Middle of Cash area
-            mode='lines',
-            name='Cash_hover',
-            line=dict(color='rgba(0,0,0,0)', width=0),
-            showlegend=False,
-            customdata=weight_df['Cash'] * 100,
-            hovertemplate='<b>Cash</b>: %{customdata:.1f}%<extra></extra>'
-        ))
+    # Calculate dynamic y-axis range to accommodate negative cash
+    min_cash = weight_df['Cash'].min() * 100
+    max_total = 100  # Risky assets should sum to ~100% when leveraged
+    
+    # Set y-axis range with some padding
+    y_min = min(min_cash - 5, -10) if min_cash < -1 else -5
+    y_max = max(max_total + 5, 105)
     
     fig.update_layout(
-        title="Portfolio Weight Evolution During Backtest",
+        title="Portfolio Weight Evolution During Backtest<br><sub>Cash at bottom (negative = borrowing)</sub>",
         xaxis_title="Date",
         yaxis_title="Weight (%)",
         height=400,
-        yaxis=dict(range=[0, 100]),
+        yaxis=dict(range=[y_min, y_max]),
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         hovermode='x unified'
+    )
+    
+    # Add horizontal line at 0% for reference
+    fig.add_hline(
+        y=0, 
+        line_dash="dash", 
+        line_color="black", 
+        opacity=0.5,
+        annotation_text="0% (No Cash Position)",
+        annotation_position="bottom right"
     )
     
     return fig
@@ -778,6 +832,24 @@ def main():
         help="Window for correlation estimation (Breaking the Market: fast adaptation)"
     )
     
+    no_leverage = st.sidebar.checkbox(
+        "No Leverage (Cash = 0%)",
+        value=False,
+        help="Force cash position to 0%. Disables leverage and uses only risky assets."
+    )
+    
+    target_volatility = st.sidebar.slider(
+        "Target Volatility (%)",
+        min_value=1.0,
+        max_value=25.0,
+        value=10.0,
+        step=0.5,
+        disabled=no_leverage,
+        help="Desired annual portfolio volatility. System will apply leverage to achieve this target (max 3x leverage)" if not no_leverage else "Disabled when 'No Leverage' is checked"
+    ) / 100.0  # Convert percentage to decimal
+    
+    # Leverage status (will be populated after optimization)
+    leverage_placeholder = st.sidebar.empty()
     
     # Backtest configuration (always enabled)
     st.sidebar.header("🧪 Backtest Settings")
@@ -822,9 +894,75 @@ def main():
                 result = optimize_min_variance(covariance_matrix)
             
             if result['success']:
-                # Detailed analysis
+                # Apply leverage if target volatility is specified and no_leverage is not checked
+                if target_volatility is not None and target_volatility != 0.0 and not no_leverage:
+                    # Extract risky covariance matrix (SPY, TLT, GLD only)
+                    risky_cov_matrix = covariance_matrix[:3, :3]
+                    
+                    # Calculate leveraged portfolio
+                    with st.spinner("Calculating leverage for target volatility..."):
+                        leverage_result = calculate_leveraged_portfolio(
+                            risky_cov_matrix, 
+                            target_volatility, 
+                            max_leverage=3.0
+                        )
+                    
+                    if leverage_result['success']:
+                        # Use leveraged weights and store leverage info
+                        final_weights = leverage_result['final_weights']
+                        calculated_leverage = leverage_result['calculated_leverage']
+                        mvp_volatility = leverage_result['mvp_volatility']
+                        
+                        # Update result dict with leveraged information
+                        result['weights'] = final_weights
+                        result['leverage'] = calculated_leverage
+                        result['mvp_volatility'] = mvp_volatility
+                        result['target_volatility'] = target_volatility
+                        
+                        # Display leverage information in sidebar placeholder
+                        if calculated_leverage > 1.01:  # Show leverage info if significantly leveraged
+                            with leverage_placeholder.container():
+                                st.markdown("### ⚡ Leverage Applied")
+                                st.markdown(f"**Target Volatility**: {target_volatility*100:.1f}%")
+                                st.markdown(f"**MVP Volatility**: {mvp_volatility*100:.1f}%")
+                                st.markdown(f"**Applied Leverage**: {calculated_leverage:.2f}x")
+                                st.markdown(f"**Borrowed Amount**: {abs(final_weights[-1])*100:.1f}%")
+                        else:
+                            with leverage_placeholder.container():
+                                st.markdown("### ⚙️ No Leverage Applied")
+                                st.markdown(f"**Target Volatility**: {target_volatility*100:.1f}%")
+                                st.markdown(f"**MVP Volatility**: {mvp_volatility*100:.1f}% (meets target)")
+                    else:
+                        st.error(f"Leverage calculation failed: {leverage_result['error']}")
+                        # Fall back to unleveraged weights
+                        final_weights = result['weights']
+                        calculated_leverage = 1.0
+                elif no_leverage:
+                    # Force cash to 0% by using only risky assets
+                    risky_weights = result['weights'][:3]  # SPY, TLT, GLD
+                    # Normalize risky weights to sum to 1.0
+                    risky_weights = risky_weights / risky_weights.sum()
+                    # Set cash to exactly 0%
+                    final_weights = np.append(risky_weights, 0.0)
+                    calculated_leverage = 1.0
+                    
+                    # Update result dict
+                    result['weights'] = final_weights
+                    result['leverage'] = calculated_leverage
+                    
+                    # Display no leverage status
+                    with leverage_placeholder.container():
+                        st.markdown("### 🚫 No Leverage (Cash = 0%)")
+                        st.markdown(f"**Risky Assets Only**: SPY + TLT + GLD = 100%")
+                        st.markdown(f"**Cash Position**: 0.0% (forced)")
+                else:
+                    # Normal case: use original weights (may include cash)
+                    final_weights = result['weights']
+                    calculated_leverage = 1.0
+                
+                # Detailed analysis using final weights
                 analysis = analyze_min_variance_portfolio(
-                    result['weights'], 
+                    final_weights, 
                     covariance_matrix, 
                     ASSETS
                 )
@@ -849,7 +987,8 @@ def main():
                         create_weights_chart(
                             result['weights'], 
                             result['diversification_ratio'],
-                            result['effective_n_assets']
+                            result['effective_n_assets'],
+                            leverage=result.get('leverage', 1.0)
                         ),
                         use_container_width=True
                     )
@@ -872,7 +1011,7 @@ def main():
                 
                 with col4:
                     st.plotly_chart(
-                        create_volatility_comparison_chart(analysis, sigma_window),
+                        create_volatility_comparison_chart(analysis, sigma_window, result.get('mvp_volatility')),
                         use_container_width=True
                     )
                 
@@ -980,7 +1119,7 @@ def main():
                 st.subheader("📈 Historical Performance Analysis")
                 
                 # Run walk-forward backtest analysis
-                cache_key = get_data_hash(data, start_str, end_str, sigma_window, rho_window, rebalance_freq)
+                cache_key = get_data_hash(data, start_str, end_str, sigma_window, rho_window, rebalance_freq, target_volatility, no_leverage)
                 
                 with st.spinner(f"Running walk-forward backtest... (this may take 30-60 seconds for {st.session_state.date_selection})"):
                     try:
@@ -996,7 +1135,9 @@ def main():
                             rebalance_freq,
                             max(sigma_window, rho_window),
                             sigma_window,
-                            rho_window
+                            rho_window,
+                            target_volatility,
+                            no_leverage
                         )
                         
                         # Compare with static weights

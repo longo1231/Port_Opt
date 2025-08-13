@@ -50,6 +50,107 @@ Port_Optimizer/
 - **Rolling window estimation** - uses only data available at each rebalancing date
 - **Performance comparison** - dynamic vs static vs SPY benchmark
 
+## Leverage Feature: Volatility Targeting
+
+**NEW MAJOR FEATURE**: Complete leverage system for volatility targeting with professional UI controls.
+
+### Core Concept
+
+The system applies leverage to the minimum variance portfolio to achieve a user-specified target volatility:
+
+```
+Leverage = min(Target_Volatility / MVP_Volatility, 3.0)
+Final_Weights = [Risky_Assets * Leverage, 1.0 - Leverage]
+```
+
+**Example**: If MVP volatility is 8% and target is 12%:
+- Leverage = 12% ÷ 8% = 1.5x
+- SPY: 40% → 60%, TLT: 35% → 52.5%, GLD: 25% → 37.5%
+- Cash: 0% → -50% (borrowed to fund leveraged positions)
+
+### UI Implementation
+
+**Sidebar Organization** (top to bottom):
+1. **📊 Data Configuration** - Date selection
+2. **⚙️ Optimization Parameters** - All grouped together:
+   - Volatility Window (σ estimation): 10-252 days
+   - Correlation Window (ρ estimation): 5-120 days  
+   - **Target Volatility**: 1-25% (key leverage control)
+   - **"No Leverage" Checkbox**: Forces Cash = 0%, disables slider
+3. **⚡ Leverage Status** - Dynamic feedback section
+4. **🧪 Backtest Settings** - Rebalancing frequency
+
+**Smart UI Behavior**:
+- Target volatility slider **disabled** when "No Leverage" checked
+- Real-time leverage calculation and display
+- Clear visual feedback for leverage status
+
+### Technical Implementation
+
+**Key Functions Added**:
+```python
+# optimizer.py
+optimize_min_variance_risky_only()     # 3x3 optimization for SPY/TLT/GLD
+calculate_leveraged_portfolio()        # 6-step leverage calculation
+
+# backtest.py  
+walk_forward_backtest(target_volatility=None)  # Leverage-aware backtesting
+
+# app.py
+create_weights_chart(leverage=None)    # Shows negative cash with annotations
+create_weight_evolution_chart()        # Revolutionary stacked area chart
+```
+
+### Portfolio Visualization Breakthrough
+
+**Weight Evolution Chart**: Complete redesign for leverage support
+- **New stacking order** (bottom → top): Cash → SPY → TLT → GLD
+- **Negative cash visualization**: Red area extends below 0% reference line
+- **Dynamic Y-axis**: Auto-adjusts for borrowed amounts
+- **Clear leverage indication**: Users see exactly how much is borrowed
+
+**Portfolio Weights Chart**: Enhanced for leverage display
+- **Leverage annotation**: Shows applied leverage ratio in title
+- **Negative cash annotation**: Arrow pointing to borrowed amount
+- **Reference line**: 0% line for visual clarity
+
+### Leverage Calculation Logic (6-Step Process)
+
+1. **Extract risky covariance matrix** (3x3: SPY, TLT, GLD)
+2. **Optimize MVP on risky assets** → weights sum to 1.0
+3. **Calculate MVP volatility** from optimized risky portfolio
+4. **Determine required leverage** = Target ÷ MVP (capped at 3x)
+5. **Scale risky weights** by leverage factor
+6. **Set cash weight** = 1.0 - leverage (negative when leveraged)
+
+### Backtesting Integration
+
+**Constant Target Volatility**: 
+- Backtesting engine applies same target volatility throughout history
+- Each rebalancing period: optimize → calculate leverage → apply
+- Performance comparison: leveraged vs unleveraged strategies
+- Cache system: Includes target volatility in cache keys
+
+### Error Handling & Robustness
+
+**Leverage Constraints**:
+- Maximum 3x leverage (reasonable for retail)
+- Graceful fallback to unleveraged weights on calculation failure
+- "No Leverage" mode: Forces exact 0% cash position
+
+**UI Safety Features**:
+- Disabled slider prevents user confusion
+- Real-time feedback on leverage applied
+- Clear indication when no leverage needed (MVP ≈ Target)
+
+### Key Benefits
+
+1. **Professional Feature**: Institutional-grade volatility targeting
+2. **Educational Value**: Users see exactly how leverage works
+3. **Risk Management**: Capped leverage prevents excessive risk
+4. **Flexible Control**: Easy toggle between leveraged/unleveraged
+5. **Visual Clarity**: Revolutionary chart shows borrowing intuitively
+
 ## Development Guidelines
 
 ### When making changes:
