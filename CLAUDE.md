@@ -128,26 +128,67 @@ This system has focused fallbacks:
 - **UI**: Fast rendering with clean interface, parameter changes require full recomputation
 - **Stability**: Converges reliably, no solver issues
 
-## Current Application State (August 2025)
+## Current Application State (August 2025 - Pre-Leverage Implementation)
 
 **Major Features:**
 - **Always-on Walk-Forward Backtesting**: Replaced misleading perfect foresight analysis with realistic historical backtesting
 - **Interactive Rolling Windows**: Users can adjust volatility (σ) and correlation (ρ) estimation windows via UI sliders
 - **Comprehensive Performance Comparison**: Three-way comparison (Dynamic vs Static vs SPY) with full metrics
-- **Advanced Visualizations**: Portfolio weight evolution, performance charts, correlation heatmaps
+- **Advanced Visualizations**: Portfolio weight evolution, drawdown analysis, rolling risk metrics
 - **Realistic Cost Analysis**: Turnover tracking and rebalancing frequency metrics
+
+**Chart Suite:**
+- **Current Portfolio Weights**: Bar chart showing optimal allocation
+- **Performance Comparison**: Dynamic portfolio performance vs static vs SPY benchmark
+- **Weight Evolution**: Stacked area chart showing portfolio changes over time
+- **Drawdown Analysis**: Peak-to-trough declines for all portfolios and individual assets
+- **Rolling Risk Metrics**: 60-day rolling Sharpe ratio and volatility with dual y-axes
+- **Correlation Heatmap**: Asset correlation matrix with color coding
 
 **User Interface:**
 - **Sidebar Controls**: Date range selection, rolling window parameters, rebalancing frequency
 - **Main Dashboard**: Current portfolio weights, expected returns (display only), historical analysis
 - **Performance Sections**: Dynamic comparison, static portfolio, SPY benchmark (5 columns each)
-- **Charts**: Weight evolution (with correct hover tooltips), performance comparison, correlation matrix
+- **Charts**: Clean hover tooltips with unified date display, professional formatting
 
 **Technical Implementation:**
 - **Caching**: Expensive backtest computations cached for 1 hour with smart cache keys
 - **Data Pipeline**: Extended historical data fetching for proper rolling windows
 - **Error Handling**: Graceful fallbacks for optimization failures and data issues
 - **Parameter Validation**: Rolling windows properly passed through entire backtest pipeline
+- **Chart Architecture**: Plotly-based interactive visualizations with consistent styling
+
+**Core Assets & Data:**
+- **Risky Assets**: SPY (US Equity), TLT (Long Treasury), GLD (Gold)
+- **Cash Proxy**: BIL (Treasury Bills) for realistic short-term rates
+- **Data Source**: Yahoo Finance with robust error handling and fallbacks
+- **Returns Calculation**: Simple returns (not log returns) for correct optimization
+
+## Upcoming Feature: Volatility Targeting with Leverage (In Development)
+
+**Objective**: Allow users to apply leverage to achieve target volatility levels
+**Implementation Status**: Ready to begin development 
+
+**Core Features:**
+- **Target Volatility Slider**: 1% to 25% range, 10% default, 0.5% increments
+- **Automatic Leverage Calculation**: System calculates required leverage to hit target
+- **Leverage Cap**: Maximum 3x leverage for risk management
+- **Negative Cash Display**: Bar chart shows borrowing when leverage > 1.0x
+- **Cost Integration**: Uses BIL rate for borrowing costs (simplified approach)
+
+**Technical Approach:**
+- **Step 1**: Extract risky assets only from covariance matrix (3x3: SPY, TLT, GLD)
+- **Step 2**: Optimize minimum variance on risky assets only (weights sum to 1.0)
+- **Step 3**: Calculate MVP volatility for risky portfolio
+- **Step 4**: Determine leverage = target_volatility / mvp_volatility (max 3.0x)
+- **Step 5**: Scale risky weights by leverage, set cash = 1.0 - leverage
+- **Step 6**: Adjust returns for borrowing costs when cash < 0
+
+**Backtesting Integration:**
+- **Constant Target Volatility**: Each rebalance maintains user's target volatility
+- **Variable Leverage**: Leverage adjusts as MVP volatility changes over time
+- **Turnover Tracking**: Monitor both weight changes and leverage adjustments
+- **Performance Metrics**: Show leveraged vs unleveraged comparisons
 
 ## Key Metrics and Validation
 
