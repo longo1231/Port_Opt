@@ -16,7 +16,7 @@ import pickle
 
 from data.loader import DataLoader
 from estimators import estimate_covariance_matrix, estimate_expected_returns, get_estimation_info
-from optimizer import optimize_min_variance, analyze_min_variance_portfolio, calculate_leveraged_portfolio
+from optimizer import optimize_min_variance, analyze_min_variance_portfolio, calculate_leveraged_portfolio, calculate_portfolio_diagnostics
 from backtest import walk_forward_backtest, compare_with_static_weights
 from config import ASSETS, PORTFOLIO_TEMPLATES, DEFAULT_DATE_RANGE_YEARS, SIGMA_WINDOW, RHO_WINDOW
 
@@ -777,6 +777,174 @@ def create_returns_comparison_chart(expected_returns, weights, assets=None):
     return fig
 
 
+def create_diagnostic_summary_card(diagnostics):
+    """Create a formatted diagnostic summary card."""
+    score = diagnostics['suitability_score']
+    assessment = diagnostics['assessment']
+    color = diagnostics['color']
+    recommendation = diagnostics['recommendation']
+    issues = diagnostics['issues']
+    
+    # Color mapping to match Streamlit's dark theme containers
+    if color == 'green':
+        bg_color = '#0e1117'  # Streamlit dark background
+        border_color = '#28a745'  # Clean green border
+        icon = '✅'
+    elif color == 'yellow':
+        bg_color = '#0e1117'  # Streamlit dark background
+        border_color = '#ffc107'  # Clean yellow border
+        icon = '⚠️'
+    else:  # red
+        bg_color = '#0e1117'  # Streamlit dark background
+        border_color = '#dc3545'  # Clean red border
+        icon = '❌'
+    
+    # Build issues list
+    issues_text = ""
+    if issues:
+        issues_text = "<strong>Issues Detected:</strong><br>"
+        for issue in issues:
+            issues_text += f"&nbsp;&nbsp;&nbsp;• {issue}<br>"
+    
+    card_content = f"""
+<div style="background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 10px; padding: 20px; margin: 10px 0;">
+    <h3 style="margin-top: 0; color: {border_color};">
+        {icon} Portfolio Diagnostics: {score}/100 ({assessment})
+    </h3>
+    <p style="font-size: 16px; margin: 10px 0;">
+        <strong>Recommendation:</strong> {recommendation}
+    </p>
+    {f'<div style="margin: 15px 0; font-size: 14px;">{issues_text}</div>' if issues_text else ''}
+    <details style="margin-top: 15px;">
+        <summary style="cursor: pointer; font-weight: bold;">📊 Score Breakdown</summary>
+        <div style="margin: 10px 0; font-size: 14px;">
+            <div>• Correlation Diversity: {diagnostics['score_components']['correlation']}/40</div>
+            <div>• Volatility Balance: {diagnostics['score_components']['volatility_balance']}/30</div>
+            <div>• Asset Class Diversity: {diagnostics['score_components']['asset_class_diversity']}/30</div>
+        </div>
+    </details>
+</div>"""
+    
+    return card_content
+
+
+def create_asset_explanation_table(diagnostics):
+    """Create detailed allocation reasoning table."""
+    asset_data = []
+    
+    # Sort by weight (descending)
+    sorted_assets = sorted(diagnostics['asset_diagnostics'], key=lambda x: x['weight'], reverse=True)
+    
+    for asset_diag in sorted_assets:
+        asset_data.append({
+            'Asset': asset_diag['asset'],
+            'Allocation': f"{asset_diag['weight']:.1%}",
+            'Volatility': f"{asset_diag['volatility']:.1f}%",
+            'Vol Rank': f"#{asset_diag['vol_rank']}",
+            'Avg Correlation': f"{asset_diag['avg_correlation']:.2f}",
+            'Allocation Reason': asset_diag['reason']
+        })
+    
+    df = pd.DataFrame(asset_data)
+    
+    return df
+
+
+def create_volatility_allocation_scatter(diagnostics, show_excluded=True):
+    """Create scatter plot showing volatility vs allocation relationship."""
+    fig = go.Figure()
+    
+    # Prepare data
+    assets = []
+    volatilities = []
+    allocations = []
+    colors = []
+    hover_texts = []
+    
+    for asset_diag in diagnostics['asset_diagnostics']:
+        if not show_excluded and asset_diag['weight'] < 0.001:
+            continue
+            
+        assets.append(asset_diag['asset'])
+        volatilities.append(asset_diag['volatility'])
+        allocations.append(asset_diag['weight'] * 100)  # Convert to percentage
+        
+        # Color by category (more readable colors)
+        category = asset_diag['category']
+        if category == 'dominant':
+            colors.append('#2d5a27')  # Dark forest green
+        elif category == 'balanced':
+            colors.append('#1f4e79')  # Dark blue
+        elif category == 'minor':
+            colors.append('#b8860b')  # Dark golden rod
+        elif category == 'minimal':
+            colors.append('#cc5500')  # Dark orange
+        else:  # excluded
+            colors.append('#8b0000')  # Dark red
+        
+        hover_texts.append(f"{asset_diag['asset']}<br>{asset_diag['reason']}")
+    
+    # Create scatter plot
+    fig.add_trace(go.Scatter(
+        x=volatilities,
+        y=allocations,
+        mode='markers+text',
+        text=assets,
+        textposition="top center",
+        marker=dict(
+            size=12,
+            color=colors,
+            opacity=0.8,
+            line=dict(width=2, color='white')
+        ),
+        hovertext=hover_texts,
+        hoverinfo='text',
+        showlegend=False
+    ))
+    
+    # Add trend line for visualization
+    if len(volatilities) > 2:
+        # Simple inverse relationship line for reference
+        min_vol, max_vol = min(volatilities), max(volatilities)
+        x_trend = [min_vol, max_vol]
+        # Simple inverse relationship (higher vol = lower allocation)
+        max_alloc = max(allocations) if allocations else 50
+        y_trend = [max_alloc, max_alloc * 0.1]
+        
+        fig.add_trace(go.Scatter(
+            x=x_trend,
+            y=y_trend,
+            mode='lines',
+            line=dict(dash='dash', color='gray', width=2),
+            name='Expected Inverse Relationship',
+            opacity=0.5,
+            hoverinfo='skip'
+        ))
+    
+    fig.update_layout(
+        title="Volatility vs Allocation: Min Variance Logic",
+        xaxis_title="Asset Volatility (%)",
+        yaxis_title="Portfolio Allocation (%)",
+        height=400,
+        showlegend=True,
+        legend=dict(x=0.7, y=0.95)
+    )
+    
+    # Add annotation
+    fig.add_annotation(
+        text="Lower volatility → Higher allocation<br>(Minimum variance principle)",
+        xref="paper", yref="paper",
+        x=0.02, y=0.98,
+        showarrow=False,
+        font=dict(size=10, color="white"),
+        bgcolor="rgba(14, 17, 23, 0.8)",  # Streamlit dark background with transparency
+        bordercolor="gray",
+        borderwidth=1
+    )
+    
+    return fig
+
+
 def main():
     st.set_page_config(
         page_title="Minimum Variance Optimizer",
@@ -862,10 +1030,20 @@ def main():
     selected_assets = PORTFOLIO_TEMPLATES[portfolio_template]
     n_assets = len(selected_assets)
     
-    # Display selected portfolio
+    # Display selected portfolio with suitability preview
     risky_assets = [a for a in selected_assets if a != 'Cash']
+    
+    # Quick suitability assessment based on asset composition
+    if portfolio_template == 'Current':
+        score_preview = "90/100 (Excellent)"
+        score_color = "🟢"
+    else:  # MAG7
+        score_preview = "15/100 (Poor)"
+        score_color = "🔴"
+    
     st.sidebar.markdown(f"**Selected**: {', '.join(risky_assets)} + Cash")
     st.sidebar.markdown(f"**Assets**: {len(risky_assets)} risky + Cash")
+    st.sidebar.markdown(f"**Min Variance Suitability**: {score_color} {score_preview}")
     
     st.sidebar.header("⚙️ Optimization Parameters")
     st.sidebar.markdown("*These windows determine current portfolio allocation*")
@@ -1073,6 +1251,30 @@ def main():
                         create_volatility_comparison_chart(analysis, sigma_window, result.get('mvp_volatility')),
                         use_container_width=True
                     )
+                
+                # Portfolio Diagnostics Section
+                st.markdown("---")  # Separator
+                
+                # Calculate diagnostics
+                diagnostics = calculate_portfolio_diagnostics(data, result['weights'], selected_assets, covariance_matrix)
+                
+                # Display diagnostic summary card
+                diagnostic_card = create_diagnostic_summary_card(diagnostics)
+                st.markdown(diagnostic_card, unsafe_allow_html=True)
+                
+                # Diagnostic details in expandable sections
+                with st.expander("📋 Detailed Allocation Analysis", expanded=(diagnostics['suitability_score'] < 50)):
+                    col_diag1, col_diag2 = st.columns(2)
+                    
+                    with col_diag1:
+                        st.subheader("Asset Allocation Reasoning")
+                        explanation_table = create_asset_explanation_table(diagnostics)
+                        st.dataframe(explanation_table, use_container_width=True)
+                    
+                    with col_diag2:
+                        st.subheader("Volatility vs Allocation")
+                        volatility_scatter = create_volatility_allocation_scatter(diagnostics)
+                        st.plotly_chart(volatility_scatter, use_container_width=True)
                 
                 # Analysis comparison: Rolling window vs Full period
                 col5, col6 = st.columns(2)
