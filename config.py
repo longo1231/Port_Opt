@@ -6,8 +6,14 @@ Simple and focused configuration for the minimum variance approach.
 
 import numpy as np
 
-# Assets
-ASSETS = ['SPY', 'TLT', 'GLD', 'Cash']
+# Portfolio Templates
+PORTFOLIO_TEMPLATES = {
+    'Current': ['SPY', 'TLT', 'GLD', 'Cash'],  # Original diversified portfolio
+    'MAG7': ['AMZN', 'AAPL', 'MSFT', 'GOOG', 'META', 'TSLA', 'NVDA', 'Cash']  # Magnificent 7 tech stocks
+}
+
+# Default assets (for backward compatibility)
+ASSETS = PORTFOLIO_TEMPLATES['Current']
 
 # Time series parameters
 TRADING_DAYS_PER_YEAR = 252

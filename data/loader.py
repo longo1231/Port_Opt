@@ -133,12 +133,13 @@ class DataLoader:
         start_date: str,
         end_date: str,
         risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
-        use_treasury_bills: bool = True
+        use_treasury_bills: bool = True,
+        custom_tickers: Optional[list] = None
     ) -> pd.DataFrame:
         """
         Fetch real market data from Yahoo Finance.
         
-        Downloads adjusted closing prices for SPY, TLT, GLD and computes
+        Downloads adjusted closing prices for specified tickers and computes
         simple returns. Uses Treasury bill ETF (BIL) for cash returns if available.
         
         Parameters
@@ -151,27 +152,35 @@ class DataLoader:
             Annualized risk-free rate fallback for cash
         use_treasury_bills : bool, default True
             Whether to use Treasury bill ETF data for cash returns
+        custom_tickers : list, optional
+            List of tickers to fetch (excluding 'Cash'). If None, uses default SPY, TLT, GLD
             
         Returns
         -------
         pd.DataFrame
-            DataFrame with columns [SPY, TLT, GLD, Cash] containing daily simple returns
+            DataFrame with columns for each ticker plus Cash, containing daily simple returns
             
         Raises
         ------
         Exception
             If data fetching fails or insufficient data is available
         """
-        # Ticker mapping (now using SPY directly per spec)
-        ticker_map = {
-            'SPY': 'SPY',  # SPY ETF per spec
-            'TLT': 'TLT',  # 20+ year Treasury ETF
-            'GLD': 'GLD'   # Gold ETF
-        }
+        # Determine which tickers to fetch
+        if custom_tickers is not None:
+            # Remove 'Cash' if present in custom_tickers
+            risky_tickers = [t for t in custom_tickers if t != 'Cash']
+        else:
+            # Default ticker mapping (original behavior)
+            ticker_map = {
+                'SPY': 'SPY',  # SPY ETF per spec
+                'TLT': 'TLT',  # 20+ year Treasury ETF
+                'GLD': 'GLD'   # Gold ETF
+            }
+            risky_tickers = list(ticker_map.values())
         
         try:
-            # Download data
-            tickers = list(ticker_map.values())
+            # Download risky asset data
+            tickers = risky_tickers
             data = yf.download(
                 tickers, 
                 start=start_date, 
@@ -217,11 +226,20 @@ class DataLoader:
                     
                     # Create properly ordered DataFrame with our asset names
                     ordered_prices = pd.DataFrame(index=prices.index)
-                    for our_name, yahoo_ticker in ticker_map.items():
-                        if yahoo_ticker in original_columns:
-                            ordered_prices[our_name] = prices[yahoo_ticker]
-                        else:
-                            print(f"Warning: {yahoo_ticker} not found in Yahoo data")
+                    if custom_tickers is not None:
+                        # For custom tickers, use them directly
+                        for ticker in risky_tickers:
+                            if ticker in original_columns:
+                                ordered_prices[ticker] = prices[ticker]
+                            else:
+                                print(f"Warning: {ticker} not found in Yahoo data")
+                    else:
+                        # For default behavior, use ticker mapping
+                        for our_name, yahoo_ticker in ticker_map.items():
+                            if yahoo_ticker in original_columns:
+                                ordered_prices[our_name] = prices[yahoo_ticker]
+                            else:
+                                print(f"Warning: {yahoo_ticker} not found in Yahoo data")
                     
                     prices = ordered_prices
             
@@ -286,8 +304,11 @@ class DataLoader:
                 simple_returns['Cash'] = daily_rf
                 print(f"ℹ️  Using constant risk-free rate: {risk_free_rate:.1%}")
             
-            # Ensure column order matches ASSETS
-            return simple_returns[ASSETS]
+            # Ensure column order matches requested assets
+            if custom_tickers is not None:
+                return simple_returns[custom_tickers]
+            else:
+                return simple_returns[ASSETS]
             
         except Exception as e:
             raise Exception(f"Failed to fetch market data: {str(e)}")

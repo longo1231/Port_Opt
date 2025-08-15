@@ -48,6 +48,26 @@ Port_Optimizer/
 - **True historical analysis** - no look-ahead bias
 - **Weekly rebalancing** - realistic transaction costs
 - **Rolling window estimation** - uses only data available at each rebalancing date
+
+## Portfolio Templates System
+
+**Available Templates:**
+- **Current**: `['SPY', 'TLT', 'GLD', 'Cash']` - Original diversified portfolio
+- **MAG7**: `['AMZN', 'AAPL', 'MSFT', 'GOOG', 'META', 'TSLA', 'NVDA', 'Cash']` - Magnificent 7 tech stocks
+
+**Template Features:**
+- **Dynamic Asset Support**: All modules handle variable asset counts
+- **UI Integration**: Sidebar template selector in Streamlit dashboard  
+- **Data Fetching**: Automatic ticker mapping and validation
+- **Chart Compatibility**: All visualizations adapt to selected assets
+- **Cache Management**: Template selection included in cache keys
+
+**Key Implementation Details:**
+- **config.py**: `PORTFOLIO_TEMPLATES` dictionary with template definitions
+- **data/loader.py**: `custom_tickers` parameter for dynamic data fetching
+- **app.py**: Template selector updates `selected_assets` throughout application
+- **Chart Functions**: All accept dynamic `assets` parameter instead of hardcoded ASSETS
+- **Backtest Engine**: `assets` parameter passed through for variable portfolio sizes
 - **Performance comparison** - dynamic vs static vs SPY benchmark
 
 ## Leverage Feature: Volatility Targeting
@@ -185,10 +205,16 @@ create_weight_evolution_chart()        # Revolutionary stacked area chart
 
 ### Common Tasks:
 
-**Adding new assets:**
-1. Update `ASSETS` in config.py
-2. Update ticker mapping in `data/loader.py`
-3. Test with live data
+**Adding new portfolio templates:**
+1. Add template to `PORTFOLIO_TEMPLATES` in config.py
+2. Test data fetching with `custom_tickers` parameter
+3. Validate optimization with new asset count
+4. Test all chart functions with dynamic assets
+
+**Adding individual assets to existing templates:**
+1. Update template definition in `PORTFOLIO_TEMPLATES` 
+2. Test ticker availability in Yahoo Finance
+3. Validate optimization performance
 
 **Modifying risk model:**
 1. Update estimation windows in config.py (`SIGMA_WINDOW`, `RHO_WINDOW`)
@@ -340,6 +366,14 @@ This system has focused fallbacks:
 - **Improved**: Consistent 5-column layout for Dynamic, Static, and SPY portfolios
 - **Enhanced**: Color-coded delta comparisons for all metrics
 - **File**: app.py performance comparison sections
+
+**Historical Performance Chart Extreme Outliers (SOLVED):**
+- **Problem**: NVDA's 865% 3-year gain dominated chart scale, making other assets invisible
+- **Root Cause**: MAG7 template includes extreme AI boom performers that dwarf traditional assets
+- **Solution**: Added outlier detection and smart chart annotations
+- **Impact**: Chart shows final percentages in legend (e.g. "NVDA (865%)"), adds warning annotations
+- **Enhanced**: Extended color palette for 8 MAG7 assets, maintained visual hierarchy
+- **File**: app.py create_backtest_performance_chart()
 
 ## Maintenance Tasks
 

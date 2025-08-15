@@ -82,7 +82,8 @@ def calculate_period_performance(returns_data: pd.DataFrame, weights: np.ndarray
         return {
             'period_return': 0.0,
             'period_volatility': 0.0,
-            'n_days': 0
+            'n_days': 0,
+            'daily_returns': pd.Series(dtype=float)  # Empty series
         }
     
     # Calculate portfolio returns for the period
@@ -103,7 +104,7 @@ def calculate_period_performance(returns_data: pd.DataFrame, weights: np.ndarray
 def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date: str,
                          rebalance_freq: str = 'weekly', min_history_days: int = None,
                          sigma_window: int = None, rho_window: int = None, 
-                         target_volatility: float = None) -> Dict:
+                         target_volatility: float = None, assets: list = None) -> Dict:
     """
     Execute walk-forward backtest with periodic rebalancing.
     
@@ -137,6 +138,14 @@ def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date:
         Comprehensive backtest results including performance metrics,
         weight history, and comparison with static approach
     """
+    # Set default assets if not provided
+    if assets is None:
+        assets = ASSETS  # Fallback to default
+    
+    # Calculate number of risky assets (excluding Cash)
+    n_risky = len([a for a in assets if a != 'Cash'])
+    n_total = len(assets)
+    
     # Set default windows if not provided
     if sigma_window is None:
         sigma_window = SIGMA_WINDOW
@@ -171,6 +180,7 @@ def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date:
     portfolio_values = [1.0]  # Start with $1 invested
     portfolio_dates = [backtest_start]
     optimization_errors = []
+    executed_rebalance_dates = []  # Track dates that actually got executed
     
     # Main backtest loop
     print(f"Starting backtest from {start_date} to {end_date} with {len(rebalance_dates)} rebalancing dates")
@@ -206,7 +216,8 @@ def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date:
                     'error': optimization_result.get('error', 'Unknown error')
                 })
                 # Use equal weights as fallback
-                weights = np.array([0.33, 0.33, 0.34, 0.0])  # Equal weight risky assets
+                weights = np.zeros(n_total)
+                weights[:n_risky] = 1.0 / n_risky  # Equal weight risky assets
                 print(f"Optimization failed on {rebal_date}, using equal weights")
             else:
                 weights = optimization_result['weights']
@@ -214,8 +225,8 @@ def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date:
                 # Apply leverage if target volatility is specified
                 if target_volatility is not None and target_volatility > 0:
                     try:
-                        # Extract risky covariance matrix (SPY, TLT, GLD only)
-                        risky_cov_matrix = covariance_matrix[:3, :3]
+                        # Extract risky covariance matrix (excluding Cash)
+                        risky_cov_matrix = covariance_matrix[:n_risky, :n_risky]
                         
                         # Calculate leveraged portfolio
                         leverage_result = calculate_leveraged_portfolio(
@@ -240,25 +251,41 @@ def walk_forward_backtest(returns_data: pd.DataFrame, start_date: str, end_date:
                 'error': str(e)
             })
             # Use equal weights as fallback
-            weights = np.array([0.33, 0.33, 0.34, 0.0])
+            weights = np.zeros(n_total)
+            weights[:n_risky] = 1.0 / n_risky  # Equal weight risky assets
             print(f"Error on {rebal_date}: {e}, using equal weights")
         
         # Store weight history
-        weight_history.append({
+        weight_entry = {
             'date': rebal_date,
-            'weights': weights.copy(),
-            'SPY': weights[0],
-            'TLT': weights[1], 
-            'GLD': weights[2],
-            'Cash': weights[3]
-        })
+            'weights': weights.copy()
+        }
+        # Add individual asset weights dynamically
+        for j, asset in enumerate(assets):
+            weight_entry[asset] = weights[j]
+        weight_history.append(weight_entry)
+        
+        # Track this as an executed rebalance date
+        executed_rebalance_dates.append(rebal_date)
         
         # Calculate performance until next rebalance (or end date)
         period_start = rebal_datetime
-        if i < len(rebalance_dates) - 1:
-            period_end = pd.to_datetime(rebalance_dates[i + 1]) - timedelta(days=1)
-        else:
-            period_end = pd.to_datetime(end_date)
+        
+        # Find the next rebalance date that will actually be executed
+        # (by looking ahead in the original rebalance_dates list)
+        period_end = pd.to_datetime(end_date)  # Default to end date
+        
+        for next_idx in range(i + 1, len(rebalance_dates)):
+            next_rebal_date = rebalance_dates[next_idx]
+            next_rebal_datetime = pd.to_datetime(next_rebal_date)
+            
+            # Check if this next date has sufficient data (same logic as main loop)
+            if next_rebal_datetime >= backtest_start:
+                next_available_data = returns_data[returns_data.index <= next_rebal_datetime]
+                if len(next_available_data) >= min_history_days:
+                    # This next date will be executed, so end our period just before it
+                    period_end = next_rebal_datetime - timedelta(days=1)
+                    break
             
         # Get performance for this holding period
         period_perf = calculate_period_performance(

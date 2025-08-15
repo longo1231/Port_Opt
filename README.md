@@ -7,18 +7,20 @@ A clean and stable minimum variance portfolio optimizer that achieves natural di
 
 ## 🎯 Overview
 
-This application implements minimum variance portfolio optimization for SPY, TLT, GLD, and Cash. By eliminating expected returns from the objective function, it avoids corner solutions and naturally creates diversified portfolios.
+This application implements minimum variance portfolio optimization with multiple portfolio templates. By eliminating expected returns from the objective function, it avoids corner solutions and naturally creates diversified portfolios.
 
 **Key Innovation**: Focuses purely on **risk reduction through diversification** rather than trying to predict which assets will perform best.
 
 ### Core Features
 
 - **Minimum Variance Optimization**: `min w^T Σ w` (no expected returns needed)
-- **🎯 Volatility Targeting with Leverage**: Professional-grade leverage system (NEW!)
+- **📊 Portfolio Templates**: Switch between Current (SPY/TLT/GLD) and MAG7 tech stocks
+- **🎯 Volatility Targeting with Leverage**: Professional-grade leverage system
 - **Natural Diversification**: Only way to reduce risk is through correlation benefits
 - **Stable Results**: Covariance matrices are more stable than expected returns
 - **Real-time Data**: Yahoo Finance integration with robust error handling
 - **Revolutionary Visualizations**: See exactly how leverage works
+- **Smart Chart Scaling**: Handles extreme performers (like NVDA's 865% AI boom gains)
 - **Clean Interface**: Clear visualization of diversification benefits
 
 ## 🚀 Quick Start
@@ -50,11 +52,26 @@ Port_Optimizer/
 └── CLAUDE.md               # Development documentation
 ```
 
+## 📊 Portfolio Templates
+
+Choose between different asset universes in the sidebar:
+
+**Current Portfolio**: `SPY, TLT, GLD, Cash`
+- **SPY**: S&P 500 ETF (broad market exposure)
+- **TLT**: 20+ Year Treasury ETF (safe haven, negative correlation with SPY)  
+- **GLD**: Gold ETF (inflation hedge, portfolio diversifier)
+- **Cash**: Risk-free Treasury bills via BIL ETF
+
+**MAG7 Portfolio**: `AMZN, AAPL, MSFT, GOOG, META, TSLA, NVDA, Cash`
+- **Focus**: Magnificent 7 technology stocks
+- **Characteristics**: Higher growth potential, higher volatility
+- **Note**: Includes extreme AI boom performers (NVDA 865% over 3 years!)
+
 ## 🔧 Configuration
 
 Edit `config.py` to modify:
 
-- **Assets**: Currently SPY, TLT, GLD, Cash
+- **Portfolio Templates**: Add new templates to `PORTFOLIO_TEMPLATES` dictionary
 - **Estimation windows**: SIGMA_WINDOW=60, RHO_WINDOW=30 (Breaking the Market)
 - **Cash exclusion**: EXCLUDE_CASH_FROM_OPTIMIZATION=True
 - **Risk-free rate**: For cash returns
