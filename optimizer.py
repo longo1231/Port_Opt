@@ -388,3 +388,201 @@ def analyze_min_variance_portfolio(weights: np.ndarray,
         'n_nonzero_assets': np.sum(weights > MIN_WEIGHT),
         'asset_analysis': asset_analysis
     }
+
+
+def calculate_portfolio_diagnostics(data, weights, assets, covariance_matrix):
+    """
+    Calculate comprehensive portfolio diagnostics for minimum variance suitability.
+    
+    Analyzes why certain allocations occur and provides actionable insights about
+    portfolio construction effectiveness.
+    
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Historical returns data
+    weights : np.ndarray
+        Portfolio weights (including Cash)
+    assets : list
+        Asset names
+    covariance_matrix : np.ndarray
+        Asset covariance matrix
+        
+    Returns
+    -------
+    dict
+        Comprehensive diagnostics including suitability score and explanations
+    """
+    # Filter out Cash for risky asset analysis
+    risky_assets = [a for a in assets if a != 'Cash']
+    n_risky = len(risky_assets)
+    risky_weights = weights[:n_risky]
+    risky_data = data[risky_assets]
+    risky_cov = covariance_matrix[:n_risky, :n_risky]
+    
+    # 1. Volatility Analysis
+    individual_vols = np.sqrt(np.diag(risky_cov)) * 100  # Already annualized in estimators.py
+    vol_range = individual_vols.max() - individual_vols.min()
+    vol_ratio = individual_vols.max() / individual_vols.min() if individual_vols.min() > 0 else np.inf
+    
+    # 2. Correlation Analysis
+    risky_corr = risky_data.corr()
+    correlations = []
+    for i in range(len(risky_assets)):
+        for j in range(i+1, len(risky_assets)):
+            correlations.append(risky_corr.iloc[i, j])
+    
+    avg_correlation = np.mean(correlations)
+    min_correlation = np.min(correlations)
+    max_correlation = np.max(correlations)
+    negative_correlations = sum(1 for corr in correlations if corr < -0.1)
+    
+    # 3. Asset Class Diversity (simple heuristic)
+    # Count different "types" based on ticker patterns
+    asset_types = set()
+    for asset in risky_assets:
+        if asset in ['SPY', 'VTI', 'IWM', 'QQQ']:
+            asset_types.add('equity')
+        elif asset in ['TLT', 'IEF', 'SHY', 'BND']:
+            asset_types.add('bonds')
+        elif asset in ['GLD', 'SLV', 'IAU']:
+            asset_types.add('commodities')
+        elif asset in ['VNQ', 'REZ']:
+            asset_types.add('reits')
+        else:
+            asset_types.add('individual_stock')  # Tech stocks, etc.
+    
+    asset_class_diversity = len(asset_types)
+    
+    # 4. Calculate Suitability Score (0-100)
+    score_components = {}
+    
+    # Correlation Score (40 points max)
+    if negative_correlations > 0:
+        corr_score = min(40, 20 + negative_correlations * 10)  # Bonus for negative correlations
+    elif avg_correlation < 0.3:
+        corr_score = 30
+    elif avg_correlation < 0.5:
+        corr_score = 20
+    elif avg_correlation < 0.7:
+        corr_score = 10
+    else:
+        corr_score = 0
+    score_components['correlation'] = corr_score
+    
+    # Volatility Balance Score (30 points max)
+    if vol_ratio < 1.5:
+        vol_score = 30  # Very balanced
+    elif vol_ratio < 2.0:
+        vol_score = 20  # Moderately balanced
+    elif vol_ratio < 3.0:
+        vol_score = 10  # Some imbalance
+    else:
+        vol_score = 0   # High imbalance
+    score_components['volatility_balance'] = vol_score
+    
+    # Asset Class Diversity Score (30 points max)
+    if asset_class_diversity >= 3:
+        diversity_score = 30
+    elif asset_class_diversity == 2:
+        diversity_score = 20
+    else:
+        diversity_score = 5  # All same class
+    score_components['asset_class_diversity'] = diversity_score
+    
+    total_score = sum(score_components.values())
+    
+    # 5. Individual Asset Analysis
+    asset_diagnostics = []
+    for i, asset in enumerate(risky_assets):
+        weight = risky_weights[i]
+        vol = individual_vols[i]
+        avg_corr_with_others = np.mean([risky_corr.loc[asset, other] for other in risky_assets if other != asset])
+        
+        # Determine allocation reason
+        vol_rank = np.argsort(individual_vols)[i] + 1  # 1 = lowest vol
+        
+        if weight > 0.4:
+            reason = f"🥇 Dominant (lowest volatility: {vol:.1f}%)"
+            category = "dominant"
+        elif weight > 0.15:
+            if vol_rank <= 3:
+                reason = f"⚖️ Good balance (vol rank #{vol_rank}, {vol:.1f}%)"
+            else:
+                reason = f"⚖️ Moderate allocation despite higher volatility ({vol:.1f}%)"
+            category = "balanced"
+        elif weight > 0.05:
+            reason = f"🔹 Minor role (vol: {vol:.1f}%, avg corr: {avg_corr_with_others:.2f})"
+            category = "minor"
+        elif weight > 0.001:
+            reason = f"🔸 Minimal (too volatile: {vol:.1f}%)"
+            category = "minimal"
+        else:
+            reason = f"❌ Excluded (dominated by lower-vol options)"
+            category = "excluded"
+        
+        asset_diagnostics.append({
+            'asset': asset,
+            'weight': weight,
+            'volatility': vol,
+            'vol_rank': vol_rank,
+            'avg_correlation': avg_corr_with_others,
+            'reason': reason,
+            'category': category
+        })
+    
+    # 6. Overall Assessment
+    if total_score >= 70:
+        assessment = "Excellent"
+        recommendation = "Well-suited for minimum variance optimization"
+        color = "green"
+    elif total_score >= 40:
+        assessment = "Fair"
+        recommendation = "Acceptable but limited diversification benefits"
+        color = "yellow"
+    else:
+        assessment = "Poor"
+        recommendation = "Consider Current template for better diversification"
+        color = "red"
+    
+    # 7. Issues Detected
+    issues = []
+    if vol_ratio > 2.5:
+        issues.append(f"High volatility spread ({vol_ratio:.1f}x range)")
+    if avg_correlation > 0.6:
+        issues.append("High average correlation limits diversification")
+    if asset_class_diversity == 1:
+        if 'individual_stock' in asset_types:
+            issues.append("Single sector concentration (all individual stocks)")
+        else:
+            issues.append("Single asset class concentration")
+    if negative_correlations == 0:
+        issues.append("No negative correlations found")
+    
+    return {
+        'suitability_score': total_score,
+        'assessment': assessment,
+        'recommendation': recommendation,
+        'color': color,
+        'score_components': score_components,
+        'issues': issues,
+        'volatility_stats': {
+            'individual_vols': individual_vols,
+            'vol_range': vol_range,
+            'vol_ratio': vol_ratio,
+            'lowest_vol_asset': risky_assets[np.argmin(individual_vols)],
+            'highest_vol_asset': risky_assets[np.argmax(individual_vols)]
+        },
+        'correlation_stats': {
+            'avg_correlation': avg_correlation,
+            'min_correlation': min_correlation,
+            'max_correlation': max_correlation,
+            'negative_correlations': negative_correlations,
+            'correlation_matrix': risky_corr
+        },
+        'diversity_stats': {
+            'asset_classes': list(asset_types),
+            'n_asset_classes': asset_class_diversity
+        },
+        'asset_diagnostics': asset_diagnostics
+    }

@@ -195,20 +195,22 @@ class DataLoader:
             try:
                 if len(tickers) == 1:
                     # Single ticker case
+                    single_ticker = tickers[0]
+                    
                     if hasattr(data.columns, 'levels'):
                         # Multi-level columns even for single ticker
                         if 'Adj Close' in data.columns.levels[0]:
                             prices = data['Adj Close'].iloc[:, 0].to_frame()
                         else:
                             prices = data['Close'].iloc[:, 0].to_frame()
-                        prices.columns = [list(ticker_map.keys())[0]]
+                        prices.columns = [single_ticker]
                     else:
                         # Simple columns
                         if 'Adj Close' in data.columns:
                             prices = data['Adj Close'].to_frame()
                         else:
                             prices = data['Close'].to_frame()
-                        prices.columns = [list(ticker_map.keys())[0]]
+                        prices.columns = [single_ticker]
                 else:
                     # Multiple tickers case
                     if hasattr(data.columns, 'levels') and 'Adj Close' in data.columns.levels[0]:
